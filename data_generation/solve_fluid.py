@@ -267,41 +267,39 @@ for step_idx, nu_curr in enumerate(viscosities):
             print("  Convergence reached.")
             break
 
-    # Save VTK
-    u_sol = np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T
-    vtk_path = out_dir / f"fluid_step_{step_idx:02d}.vtk"
-    mesh.save(str(vtk_path), {"velocity": u_sol, "pressure": x_sol[p_idx]})
+# Save VTK
+u_sol = np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T
+vtk_path = out_dir / f"fluid_step_{step_idx:02d}.vtk"
+mesh.save(str(vtk_path), {"velocity": u_sol, "pressure": x_sol[p_idx]})
 
-    # --- PLOTTING (MODIFICATO) ---
-    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+# --- PLOTTING (MODIFICATO) ---
+fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
-    val_mag = np.linalg.norm(u_sol, axis=1)
-    vmin, vmax = val_mag.min(), val_mag.max()
+val_mag = np.linalg.norm(u_sol, axis=1)
+vmin, vmax = val_mag.min(), val_mag.max()
 
-    # 1. Campo Velocità
-    plot(mesh, val_mag, ax=ax, cmap="turbo", shading="gouraud")
+# 1. Campo Velocità
+plot(mesh, val_mag, ax=ax, cmap="turbo", shading="gouraud")
 
-    # 2. MESH WIREFRAME (Grigio trasparente alpha 0.4)
-    # linewidth=0.5 rende la griglia sottile ed elegante
-    draw(mesh, ax=ax, color="gray", alpha=0.1, linewidth=0.2)
+# 2. MESH WIREFRAME (Grigio trasparente alpha 0.4)
+# linewidth=0.5 rende la griglia sottile ed elegante
+draw(mesh, ax=ax, color="gray", alpha=0.1, linewidth=0.05)
 
-    # 3. Muri/Bordi (Nero pieno per definire la geometria)
-    draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.0)
-    ax.set_aspect("equal", adjustable="box")
+# 3. Muri/Bordi (Nero pieno per definire la geometria)
+draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.0)
+ax.set_aspect("equal", adjustable="box")
 
-    # Colorbar Fix
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    s_map = cm.ScalarMappable(norm=norm, cmap="turbo")
-    s_map.set_array([])
+# Colorbar Fix
+norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+s_map = cm.ScalarMappable(norm=norm, cmap="turbo")
+s_map.set_array([])
 
-    cbar = fig.colorbar(s_map, ax=ax)
-    cbar.set_label("Velocity Magnitude [m/s]")
-
-    ax.set_title(f"Velocity Magnitude [Nu={nu_curr:.2e}]")
-    ax.set_axis_off()
-    plt.savefig(
-        out_dir / f"velocity_step_{step_idx:02d}.png", dpi=350, bbox_inches="tight"
-    )
-    plt.close(fig)
+cbar = fig.colorbar(s_map, ax=ax)
+cbar.set_label("Velocity Magnitude [m/s]")
+ax.set_axis_off()
+plt.savefig(
+    out_dir / f"velocity_step_{step_idx:02d}.png", dpi=350, bbox_inches="tight"
+)
+plt.close(fig)
 
 print("\nSimulation completed.")
