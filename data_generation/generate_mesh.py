@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 import gmsh
-
 from data import (
     COMPONENT_BASE_TAG,
     FLUID_TAG,
