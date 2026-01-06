@@ -47,9 +47,11 @@ We use **Taylor-Hood (P2-P1)** elements, which satisfy the LBB (Ladyzhenskaya-Ba
 
 ### Linearization (Picard Estimator)
 The convective term $(\mathbf{u} \cdot \nabla)\mathbf{u}$ is non-linear. We linearize it using **Picard iterations** (Fixed Point iteration):
+
 $$
 (\mathbf{u}^{k+1} \cdot \nabla) \mathbf{u}^{k+1} \approx (\mathbf{u}^{k} \cdot \nabla) \mathbf{u}^{k+1}
 $$
+
 Where $\mathbf{u}^k$ is the solution from the previous iteration.
 
 ### Continuation Method (Viscosity Stepping)
@@ -65,14 +67,17 @@ To handle the convection-dominated nature of the flow at lower viscosities (high
 
 ### A. SUPG (Streamline-Upwind Petrov-Galerkin)
 Added to stabilize the convective term. It adds numerical diffusion **only in the direction of the flow streamlines**, preventing cross-wind diffusion.
+
 $$
 \text{Term}_{\text{SUPG}} = \sum_{K} \tau_K (\mathbf{u}^k \cdot \nabla \mathbf{v}, \mathcal{R}(\mathbf{u}, p))_K
 $$
+
 - **Purpose**: Prevents node-to-node oscillations in velocity.
 - $\tau_K$: Stabilization parameter calculated based on local element size ($h$) and velocity magnitude.
 
 ### B. Grad-Div Stabilization
 Adds a penalty on the divergence of the velocity test functions.
+
 $$
 \text{Term}_{\text{GradDiv}} = \gamma \| \mathbf{u} \| h (\nabla \cdot \mathbf{u}, \nabla \cdot \mathbf{v})
 $$
