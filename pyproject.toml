@@ -1,7 +1,6 @@
 # --- BLACK ---
 [tool.black]
-line-length = 88 
-target-version = ['py313']
+line-length = 88
 
 # --- ISORT ---
 [tool.isort]
@@ -17,10 +16,6 @@ ignore_missing_imports = true
 
 # --- PYLINT ---
 [tool.pylint.messages_control]
-disable = [
-    "C0330",
-    "C0326",
-]
 
 [tool.pylint.format]
 max-line-length = 88

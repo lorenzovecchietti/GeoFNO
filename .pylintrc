@@ -1,0 +1,3 @@
+[TYPECHECK]
+# Lista di membri che sono generati dinamicamente o che Pylint non vede
+generated-members=skfem.*, numpy.*, cv2.*
