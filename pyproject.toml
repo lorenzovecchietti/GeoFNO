@@ -1,0 +1,26 @@
+# --- BLACK ---
+[tool.black]
+line-length = 88 
+target-version = ['py313']
+
+# --- ISORT ---
+[tool.isort]
+profile = "black"
+line_length = 88
+
+# --- MYPY ---
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+# --- PYLINT ---
+[tool.pylint.messages_control]
+disable = [
+    "C0330",
+    "C0326",
+]
+
+[tool.pylint.format]
+max-line-length = 88
