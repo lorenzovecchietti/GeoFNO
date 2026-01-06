@@ -174,7 +174,7 @@ def assign_surface_physical_groups(
         tag: gmsh.model.occ.getCenterOfMass(2, tag) for tag in component_tags_2d
     }
 
-    pcb_surf = None
+    pcb_surf: int = -1
     comp_surf_map: Dict[int, int] = {}
     solid_surfs = set()
 
@@ -195,7 +195,7 @@ def assign_surface_physical_groups(
                 break
 
     all_surfs = {tag for _, tag in surfaces}
-    fluid_surfs = list(all_surfs - solid_surfs)
+    fluid_surfs: list[int] = list(all_surfs - solid_surfs)
     comp_surfs = [comp_surf_map[t] for t in component_tags_2d if t in comp_surf_map]
 
     # Assign physical groups
@@ -248,8 +248,10 @@ def assign_boundary_physical_groups(
             t for d, t in gmsh.model.getBoundary([(2, surf)], oriented=False)
         ]
 
-    interface_lines = set(pcb_lines + comp_lines)
-    interface_lines = [t for t in interface_lines if t not in inlet + outlet + walls]
+    interface_lines_set = set(pcb_lines + comp_lines)
+    interface_lines = [
+        t for t in interface_lines_set if t not in inlet + outlet + walls
+    ]
 
     # Assign physical groups
     if inlet:

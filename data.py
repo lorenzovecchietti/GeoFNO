@@ -64,7 +64,7 @@ Q_DOT_COMP: Final[List[float]] = [
 # =============================================================================
 
 TEMP_INLET: Final[float] = 293.15  # Inlet temperature [K] (20°C)
-VEL_INLET: Final[float] = 0.1  # Inlet velocity (x-direction) [m/s]
+VEL_INLET: Final[float] = 0.05  # Inlet velocity (x-direction) [m/s]
 
 
 # =============================================================================
@@ -72,7 +72,7 @@ VEL_INLET: Final[float] = 0.1  # Inlet velocity (x-direction) [m/s]
 # =============================================================================
 
 MESH_FILE: Final[str] = "circuit_mesh_2d.msh"
-MESH_SIZE: Final[float] = 0.08  # Characteristic mesh size [m]
+MESH_SIZE: Final[float] = 0.1  # Characteristic mesh size [m]
 OUTPUT_FOLDER: Final[str] = "results"
 
 
@@ -80,8 +80,8 @@ OUTPUT_FOLDER: Final[str] = "results"
 # Simulation parameters
 # =============================================================================
 
-MAX_ITERS: Final[int] = 50
-TOL: Final[float] = 1e-5
+MAX_ITERS: Final[int] = 20
+TOL: Final[float] = 5e-5
 K: Final[int] = 1  # Polynomial degree
 
 

@@ -1,12 +1,15 @@
 """
-solve fluid skfem
+solve_fluid.py - Robust Penalty Method Version
 """
 
 import time
+import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import cm
+from matplotlib import colors as mcolors
+from matplotlib import pyplot as plt
 
 # Explicit imports
 from skfem import (
@@ -28,13 +31,15 @@ from skfem.visuals.matplotlib import draw, plot
 from data import MAX_ITERS, MESH_FILE, MESH_SIZE, NU, OUTPUT_FOLDER, TOL, VEL_INLET
 from generate_mesh import CircuitBoard, generate_gmsh_mesh_2d
 
-# Configuration
-BACKEND = "numba"  # Forces JIT compilation for speed
+# Suppress skfem warnings about singular matrix if we handle them
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # =============================================================================
 # 1. Mesh Generation and Loading
 # =============================================================================
-mesh_path = Path(MESH_FILE)
+out_dir = Path(OUTPUT_FOLDER)
+out_dir.mkdir(exist_ok=True, parents=True)
+mesh_path = Path(OUTPUT_FOLDER) / Path(MESH_FILE)
 
 if not mesh_path.exists():
     print(f"Generating mesh at {mesh_path}...")
@@ -53,103 +58,121 @@ mesh = Mesh.load(str(mesh_path))
 # =============================================================================
 # 2. Element Definition (Taylor-Hood P2-P1)
 # =============================================================================
+print("Initializing Finite Elements...")
+# P2 (Velocity) * P1 (Pressure)
 element = ElementVectorH1(ElementQuad2()) * ElementQuad1()
+
+# Basis defined ONLY on Fluid subdomain
 basis = Basis(mesh, element, elements=mesh.subdomains["Fluid"])
+print(f"  -> Total DOFs: {basis.N}")
 
 # =============================================================================
-# 3. Weak Forms (Optimized for Numba & Matrix Splitting)
+# 3. Weak Forms (Penalty Method)
 # =============================================================================
+# Stabilization params
+DELTA_SUPG = 0.5  # 1.0
+DELTA_GRADDIV = 0.1  # 1.0
+EPS_PENALTY = 1e-6
 
 
 @BilinearForm
 def stokes_flow(u, p, v, q, w):
     """
-    Standard Stokes part (Viscosity + Pressure).
-    Linear and independent of velocity u. Assembled once per viscosity step.
+    LHS = (u_prev · ∇) u + ∇p - div(u)q
     """
-    return w.nu_val * inner(grad(u), grad(v)) - p * div(v) - q * div(u)
+    return (
+        w.nu * inner(grad(u), grad(v)) - p * div(v) - q * div(u) - EPS_PENALTY * p * q
+    )
 
 
 @BilinearForm
-def supg_convection_linearized(u, _p, v, _q, w):
+def navier_stokes_lhs(u, p, v, q, w):
     """
-    Combined Convection (Newton Linearization) + SUPG Stabilization (LHS).
+    LHS = (u_prev · ∇) u + ∇p - div(u)q
     """
-    u_prev = w.u_prev
-    nu = w.nu_val
-    h = w.h
 
-    # SUPG Parameter (Tau) calculation
-    u_mag = np.sqrt(u_prev[0] ** 2 + u_prev[1] ** 2 + 1e-12)
-    tau = 1.0 / np.sqrt((2.0 * u_mag / h) ** 2 + (4.0 * nu / h**2) ** 2)
+    # Convezione Picard (Trasporto): (u_prev · ∇) u
+    # In skfem per ElementVectorH1:
+    # u.grad[0] è grad(ux), u.grad[1] è grad(uy)
+    convection = dot(w.u_prev, u.grad[0]) * v[0] + dot(w.u_prev, u.grad[1]) * v[1]
 
-    # 1. Standard Galerkin Convection (Newton: u_k * grad(u) + u * grad(u_k))
-    # Term: (u_prev . grad) u
-    conv1 = dot(grad(u), u_prev)
-    # Term: (u . grad) u_prev
-    conv2 = dot(grad(u_prev), u)
+    u_mag = np.sqrt(w.u_prev[0] ** 2 + w.u_prev[1] ** 2 + 1e-12)
+    # Tau SUPG standard
+    tau = DELTA_SUPG / np.sqrt(
+        (2.0 * u_mag / w.h) ** 2 + (9.0 * 4 * w.nu / w.h**2) ** 2
+    )
+    # 1. Galerkin Terms
+    galerkin = (
+        w.nu * inner(grad(u), grad(v))
+        - p * div(v)
+        - q * div(u)
+        + convection
+        - EPS_PENALTY * p * q
+    )
 
-    galerkin = dot(conv1 + conv2, v)
+    # 2. SUPG Terms (Coerente: stabilizziamo l'operatore LHS)
+    # Residuo LHS ≈ (u_prev · ∇)u + ∇p
+    res_x = dot(w.u_prev, u.grad[0]) + p.grad[0]
+    res_y = dot(w.u_prev, u.grad[1]) + p.grad[1]
+    supg = tau * (
+        res_x * dot(w.u_prev, v.grad[0]) + res_y * dot(w.u_prev, v.grad[1])
+    )  # Streamline vector: (u_prev · ∇) v
 
-    # 2. SUPG Stabilization
-    # Residual of linearized momentum
-    res_lin = conv1 + conv2
-    # Streamline test function
-    v_stream = dot(grad(v), u_prev)
+    # 3. Grad-Div Stabilization
+    graddiv = DELTA_GRADDIV * u_mag * w.h * div(u) * div(v)
 
-    supg = tau * dot(res_lin, v_stream)
-
-    return galerkin + supg
+    return galerkin + supg + graddiv
 
 
 @LinearForm
-def supg_convection_rhs(v, _q, w):
+def navier_stokes_rhs(_v, _q, _w):
     """
-    RHS for Newton Method: Residuals of Convection + SUPG.
+    CORREZIONE: In iterazione di Picard (Total Solution), il RHS
+    contiene solo le forze esterne (o 0). NON deve contenere la convezione
+    precedente se questa è già nel LHS, altrimenti si cancellano.
     """
-    u_prev = w.u_prev
-    nu = w.nu_val
-    h = w.h
+    return 0.0
 
-    u_mag = np.sqrt(u_prev[0] ** 2 + u_prev[1] ** 2 + 1e-12)
-    tau = 1.0 / np.sqrt((2.0 * u_mag / h) ** 2 + (4.0 * nu / h**2) ** 2)
 
-    # Convection at previous step: (u_prev . grad) u_prev
-    conv_prev = dot(grad(u_prev), u_prev)
-
-    # Galerkin RHS
-    galerkin = dot(conv_prev, v)
-
-    # SUPG RHS
-    v_stream = dot(grad(v), u_prev)
-    supg = tau * dot(conv_prev, v_stream)
-
-    return galerkin + supg
+@LinearForm
+def rhs_zero(_v, _q, _w):
+    """
+    RHS = 0
+    """
+    return 0.0
 
 
 # =============================================================================
 # 4. Boundary Conditions
 # =============================================================================
-# Retrieve DOFs
+print("Setting up Boundary Conditions...")
 dofs = basis.get_dofs(mesh.boundaries)
 u_inlet_vec = np.zeros(basis.N)
 
-# Helper indices for vector components
+# Indices helper
 idx_u = basis.split_indices()[0][basis.split_bases()[0].split_indices()[0]]
 idx_v = basis.split_indices()[0][basis.split_bases()[0].split_indices()[1]]
-idx_p = basis.split_indices()[1]
 
-# Set Inlet Velocity
+# --- 1. Inlet (Parabolic) ---
+u_inlet_dofs = np.array([], dtype=int)
+v_inlet_dofs = np.array([], dtype=int)
+
 if "Inlet" in dofs:
-    inlet_dofs_all = dofs["Inlet"].all()
-    # Intersect to find u and v DOFs on the inlet
-    u_inlet_dofs = np.intersect1d(inlet_dofs_all, idx_u)
-    v_inlet_dofs = np.intersect1d(inlet_dofs_all, idx_v)
-    
-    u_inlet_vec[u_inlet_dofs] = VEL_INLET
-    u_inlet_vec[v_inlet_dofs] = 0.0
+    inlet_nodes = dofs["Inlet"].all()
+    u_inlet_dofs = np.intersect1d(inlet_nodes, idx_u)
+    v_inlet_dofs = np.intersect1d(inlet_nodes, idx_v)
 
-# Wall DOFs (No-slip)
+    y_coords = basis.doflocs[1, u_inlet_dofs]
+    if len(y_coords) > 0:
+        y_min, y_max = y_coords.min(), y_coords.max()
+        H = y_max - y_min
+        y_mid = (y_max + y_min) / 2.0
+        # Profilo
+        u_profile = VEL_INLET * (1.0 - (2.0 * (y_coords - y_mid) / H) ** 2)
+        u_inlet_vec[u_inlet_dofs] = u_profile
+        print(f"  -> Inlet configured with {len(u_inlet_dofs)} velocity nodes.")
+
+# --- 2. Walls ---
 wall_dofs = np.array([], dtype=int)
 for b_name in ["Walls", "SolidInterfaces"]:
     if b_name in dofs:
@@ -157,113 +180,128 @@ for b_name in ["Walls", "SolidInterfaces"]:
         wall_dofs = np.concatenate(
             [wall_dofs, np.intersect1d(bd_dofs, idx_u), np.intersect1d(bd_dofs, idx_v)]
         )
+print(f"  -> Walls configured with {len(wall_dofs)} nodes.")
 
-# Inlet DOFs
-inlet_dofs = np.array([], dtype=int)
-if "Inlet" in dofs:
-    inlet_dofs_all = dofs["Inlet"].all()
-    inlet_dofs = np.concatenate(
-        [np.intersect1d(inlet_dofs_all, idx_u), np.intersect1d(inlet_dofs_all, idx_v)]
-    )
-
-# Outlet Pressure Reference
-outlet_dofs = np.array([], dtype=int)
-if "Outlet" in dofs:
-    outlet_dofs = np.intersect1d(dofs["Outlet"].all(), idx_p)
-
-# Identify Solid DOFs (inactive fluid nodes)
+# --- 3. Solid Ghost Nodes (CRITICO) ---
+# Dobbiamo vincolare a 0 tutti i nodi che appartengono agli elementi Solid
+# ma che la base ha inizializzato comunque. Altrimenti generano righe di zeri.
 fluid_dofs_indices = np.unique(basis.element_dofs)
 all_dofs = np.arange(basis.N)
-solid_dofs = np.setdiff1d(all_dofs, fluid_dofs_indices)
+solid_ghost_dofs = np.setdiff1d(all_dofs, fluid_dofs_indices)
+print(f"  -> Constraining {len(solid_ghost_dofs)} solid/ghost DOFs.")
 
-# Compile Dirichlet DOFs
+# Compile Dirichlet DOFs (Velocità Inlet + Walls + Ghost)
+# NOTA: Non fissiamo la pressione esplicitamente, usiamo EPS_PENALTY
 D_dofs = np.unique(
-    np.concatenate([inlet_dofs, wall_dofs, outlet_dofs, solid_dofs])
+    np.concatenate([u_inlet_dofs, v_inlet_dofs, wall_dofs, solid_ghost_dofs])
 ).astype(int)
 
+print(f"  -> Total Dirichlet DOFs: {len(D_dofs)}")
+
+# Init Soluzione
 x_sol = u_inlet_vec.copy()
 
 # =============================================================================
 # 5. Solver Loop
 # =============================================================================
-out_dir = Path(OUTPUT_FOLDER)
-out_dir.mkdir(exist_ok=True, parents=True)
 
-print(f"Starting Solver. Target Nu={NU}. Backend={BACKEND}")
-
-
-viscosities = np.geomspace(1e-2, NU, 10)
+# Viscosity stepping
+viscosities = np.geomspace(5e-2, NU, 8)
 ux_idx, uy_idx, p_idx = basis.nodal_dofs
+
+print("Initializing with Penalized Stokes...")
+
+A_s = asm(stokes_flow, basis, nu=viscosities[0])
+b_s = asm(rhs_zero, basis)
+# Usa 'x' come guess e 'D' per condensare
+x_sol = solve(*condense(A_s, b_s, x=x_sol, D=D_dofs))
+print("  -> Stokes initialization successful.")
+
+
+print(f"\nStarting Solver Loop. Target Nu={NU:.2e}")
+
 
 for step_idx, nu_curr in enumerate(viscosities):
     print(f"\n--- STEP {step_idx+1}/{len(viscosities)}: Nu = {nu_curr:.2e} ---")
 
-    # Optimization: Assemble Stokes matrix (Linear) ONLY ONCE per viscosity step
-    t0 = time.time()
-    A_stokes = asm(stokes_flow, basis, nu_val=nu_curr)
-    print(f"  Stokes matrix assembled in {time.time()-t0:.2f}s")
+    relax = 0.7
 
     for i in range(MAX_ITERS):
         t_iter = time.time()
 
-        # Update interpolation of previous solution
+        # Interpolate for prev terms
         x_prev_func = basis.interpolate(x_sol)
 
-        # Assemble Nonlinear parts (Convection + SUPG)
-        A_nonlinear = asm(
-            supg_convection_linearized,
-            basis,
-            u_prev=x_prev_func[0],
-            nu_val=nu_curr,
+        # Assemble Newton
+        # Passiamo h e nu esplicitamente
+        A_mat = asm(
+            navier_stokes_lhs, basis, u_prev=x_prev_func[0], nu=nu_curr, h=MESH_SIZE
         )
-
-        f_nonlinear = asm(
-            supg_convection_rhs,
-            basis,
-            u_prev=x_prev_func[0],
-            nu_val=nu_curr,
+        b_vec = asm(
+            navier_stokes_rhs, basis, u_prev=x_prev_func[0], nu=nu_curr, h=MESH_SIZE
         )
-
-        # Combine matrices
-        A_mat = A_stokes + A_nonlinear
 
         # Solve
-        x_new = solve(*condense(A_mat, f_nonlinear, x=x_sol, D=D_dofs))
+        try:
+            x_new_cand = solve(*condense(A_mat, b_vec, x=x_sol, D=D_dofs))
+        except RuntimeError as e:
+            print(f"  Solver failed (Singular?): {e}")
+            break
 
-        # Error check
-        diff = np.linalg.norm(x_new - x_sol) / (np.linalg.norm(x_new) + 1e-12)
+        # Update
+        x_new = relax * x_new_cand + (1.0 - relax) * x_sol
+
+        # Error
+        diff = np.linalg.norm(x_new - x_sol)
+        sol_norm = np.linalg.norm(x_new)
+        rel_error = diff / (sol_norm + 1e-12)
+
         x_sol = x_new
 
-        print(f"  Iter {i+1}: error = {diff:.2e} [{time.time()-t_iter:.2f}s]")
+        max_vel = np.max(
+            np.linalg.norm(np.stack([x_sol[ux_idx], x_sol[uy_idx]]), axis=0)
+        )
+        print(f"  Iter {i+1:2d}: err={rel_error:.2e}, max_u={max_vel:.3f}")
 
-        if diff < TOL:
+        if rel_error < TOL:
             print("  Convergence reached.")
             break
-    else:
-        print("  Warning: Max iterations reached without convergence.")
 
-    # Save output
-    u_solution = np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T
-    p_solution = x_sol[p_idx]
-
+    # Save VTK
+    u_sol = np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T
     vtk_path = out_dir / f"fluid_step_{step_idx:02d}.vtk"
-    png_filename = f"velocity_step_{step_idx:02d}_nu_{nu_curr:.1e}.png"
+    mesh.save(str(vtk_path), {"velocity": u_sol, "pressure": x_sol[p_idx]})
 
-    mesh.save(
-        str(vtk_path),
-        {
-            "velocity": np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T,
-            "pressure": x_sol[p_idx],
-        },
+    # --- PLOTTING (MODIFICATO) ---
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+
+    val_mag = np.linalg.norm(u_sol, axis=1)
+    vmin, vmax = val_mag.min(), val_mag.max()
+
+    # 1. Campo Velocità
+    plot(mesh, val_mag, ax=ax, cmap="turbo", shading="gouraud")
+
+    # 2. MESH WIREFRAME (Grigio trasparente alpha 0.4)
+    # linewidth=0.5 rende la griglia sottile ed elegante
+    draw(mesh, ax=ax, color="gray", alpha=0.1, linewidth=0.2)
+
+    # 3. Muri/Bordi (Nero pieno per definire la geometria)
+    draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.0)
+    ax.set_aspect("equal", adjustable="box")
+
+    # Colorbar Fix
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    s_map = cm.ScalarMappable(norm=norm, cmap="turbo")
+    s_map.set_array([])
+
+    cbar = fig.colorbar(s_map, ax=ax)
+    cbar.set_label("Velocity Magnitude [m/s]")
+
+    ax.set_title(f"Velocity Magnitude [Nu={nu_curr:.2e}]")
+    ax.set_axis_off()
+    plt.savefig(
+        out_dir / f"velocity_step_{step_idx:02d}.png", dpi=350, bbox_inches="tight"
     )
-
-    fig, ax_plot = plt.subplots(1, 1, figsize=(10, 5))
-    display_u_mag = np.linalg.norm(u_solution, axis=1)
-    plot(mesh, display_u_mag, ax=ax_plot, cmap="turbo")
-    draw(mesh, ax=ax_plot, boundaries_only=True)
-    ax_plot.set_title(f"Velocity Magnitude [m/s] (nu={nu_curr:.2e})")
-    ax_plot.set_axis_off()
-    plt.savefig(out_dir / png_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 print("\nSimulation completed.")
