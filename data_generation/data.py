@@ -73,7 +73,7 @@ VEL_INLET: Final[float] = 0.05  # Inlet velocity (x-direction) [m/s]
 
 MESH_FILE: Final[str] = "circuit_mesh_2d.msh"
 MESH_SIZE: Final[float] = 0.1  # Characteristic mesh size [m]
-OUTPUT_FOLDER: Final[str] = "results"
+OUTPUT_FOLDER: Final[str] = "data_generation/results"
 
 
 # =============================================================================
