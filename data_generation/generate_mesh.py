@@ -282,6 +282,7 @@ def generate_mesh(mesh_size: float) -> None:
     gmsh.option.setNumber("Mesh.AngleToleranceFacetOverlap", 0.01)
     gmsh.option.setNumber("Mesh.RecombineAll", 1)
     gmsh.option.setNumber("Mesh.RecombinationAlgorithm", 1)
+    gmsh.option.setNumber("Mesh.SubdivisionAlgorithm", 1)  # Force all quads
 
     gmsh.model.occ.synchronize()
     gmsh.model.mesh.generate(2)
