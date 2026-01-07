@@ -51,11 +51,11 @@ K_COMPONENTS: Final[List[float]] = [
 ]  # Component thermal conductivities [W/m·K]
 
 Q_DOT_COMP: Final[List[float]] = [
-    1.0e3,  # 100 W
-    2.0e3,  # 200 W
-    1.4e3,
-    2.1e3,
-    1.8e3,
+    1.0e1,  # 100 W
+    2.0e1,  # 200 W
+    1.4e1,
+    2.1e1,
+    1.8e1,
 ]  # Heat generation per component [W]
 
 
@@ -64,7 +64,7 @@ Q_DOT_COMP: Final[List[float]] = [
 # =============================================================================
 
 TEMP_INLET: Final[float] = 293.15  # Inlet temperature [K] (20°C)
-VEL_INLET: Final[float] = 0.05  # Inlet velocity (x-direction) [m/s]
+VEL_INLET: Final[float] = 0.025  # Inlet velocity (x-direction) [m/s]
 
 
 # =============================================================================
@@ -72,16 +72,16 @@ VEL_INLET: Final[float] = 0.05  # Inlet velocity (x-direction) [m/s]
 # =============================================================================
 
 MESH_FILE: Final[str] = "circuit_mesh_2d.msh"
-MESH_SIZE: Final[float] = 0.1  # Characteristic mesh size [m]
-OUTPUT_FOLDER: Final[str] = "data_generation/results"
+MESH_SIZE: Final[float] = 0.08  # Characteristic mesh size [m]
+OUTPUT_FOLDER: Final[str] = "results"
 
 
 # =============================================================================
 # Simulation parameters
 # =============================================================================
 
-MAX_ITERS: Final[int] = 20
-TOL: Final[float] = 5e-5
+MAX_ITERS: Final[int] = 25
+TOL: Final[float] = 5e-3
 K: Final[int] = 1  # Polynomial degree
 
 

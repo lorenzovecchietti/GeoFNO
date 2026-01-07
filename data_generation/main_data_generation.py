@@ -21,41 +21,59 @@ warnings.filterwarnings("ignore")
 
 def _plot_simulation(mesh, thermal_basis, temp_sol, vel_p1_flat, out_path):
     """Internal helper to generate the final simulation image."""
-    # Setup Figure
-    _, axs = plt.subplots(2, 1, figsize=(10, 12))
 
-    # --- Prepare Velocity Magnitude for Plotting ---
-    # vel_p1_flat contains [ux_all, uy_all]. Calculate magnitude on P1 nodes.
+    # --- MODIFICA 1: Layout e Dimensioni ---
+    fig, axs = plt.subplots(2, 1, figsize=(12, 6), constrained_layout=True)
+
+    # --- Prepare Velocity Magnitude ---
     vec_basis = Basis(mesh, ElementVectorH1(ElementQuad1()))
     ux_idxs, uy_idxs = vec_basis.split_indices()
-
     u_vals, v_vals = vel_p1_flat[ux_idxs], vel_p1_flat[uy_idxs]
-    vel_mag = np.sqrt(u_vals**2 + v_vals**2)
+    vel_mag = np.sqrt(u_vals ** 2 + v_vals ** 2)
 
-    # Base scalare P1 per il plot
     p1_scalar_basis = Basis(mesh, ElementQuad1())
 
-    # 1. Velocity Plot
+    # --- 1. Velocity Plot ---
     ax = axs[0]
+
+    # ERROR FIX: 'plot' returns the axis, not the image.
+    # We plot first, then grab the mappable from ax.collections[0]
     plot(p1_scalar_basis, vel_mag, ax=ax, cmap="turbo", shading="gouraud")
-    draw(mesh, ax=ax, boundaries_only=False, color="gray", linewidth=0.05)
+    img1 = ax.collections[0]
+
+    # --- MODIFICA 2: Visibilità Mesh ---
+    draw(mesh, ax=ax, color="gray", linewidth=0.1, alpha=0.5)
     draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.5)
 
-    ax.set_title("Velocity Magnitude [m/s]")
+    ax.set_title("Velocity Magnitude [m/s]", fontsize=14)
     ax.set_aspect("equal")
     ax.axis("off")
 
-    # 2. Temperature Plot
+    # --- MODIFICA 3: Colorbar ---
+    # Now 'img1' is a QuadMesh/TriMesh object, which has the 'cmap' attribute
+    fig.colorbar(img1, ax=ax, fraction=0.046, pad=0.04, label="Magnitude [m/s]")
+
+    # --- 2. Temperature Plot ---
     ax = axs[1]
+
+    # ERROR FIX: Same here for temperature
     plot(thermal_basis, temp_sol, ax=ax, cmap="inferno", shading="gouraud")
-    draw(mesh, ax=ax, boundaries_only=False, color="gray", linewidth=0.05)
+    img2 = ax.collections[0]
+
+    draw(mesh, ax=ax, color="gray", linewidth=0.1, alpha=0.5)
     draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.5)
 
-    ax.set_title("Temperature [K]")
+    ax.set_title("Temperature [K]", fontsize=14)
     ax.set_aspect("equal")
     ax.axis("off")
 
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    # Colorbar per la temperatura
+    fig.colorbar(img2, ax=ax, fraction=0.046, pad=0.04, label="Temp [K]")
+
+    plt.savefig(out_path, dpi=350)
+    # It is good practice to close the figure to free memory if this runs in a loop
+    plt.close(fig)
+
     return u_vals, v_vals
 
 
