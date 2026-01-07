@@ -2,7 +2,6 @@
 solve_fluid.py - Modular & Robust Penalty Method Version
 """
 
-import time
 import warnings
 from pathlib import Path
 from typing import Tuple
@@ -92,11 +91,18 @@ def navier_stokes_lhs(u, p, v, q, w):
 
 @LinearForm
 def navier_stokes_rhs(_v, _q, _w):
+    """
+    Navier-Stokes Linearized RHS (Picard).
+    Reads 'w.u_prev', 'w.nu', 'w.h' from assembly context.
+    """
     return 0.0
 
 
 @LinearForm
 def rhs_zero(_v, _q, _w):
+    """
+    Zero RHS.
+    """
     return 0.0
 
 
@@ -126,32 +132,12 @@ def get_mesh() -> Mesh:
     return Mesh.load(str(mesh_path))
 
 
-def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
-    """
-    Solves Navier-Stokes on the Fluid subdomain.
-    """
-    print("Initializing Finite Elements...")
-    # P2 (Velocity) * P1 (Pressure)
-    element = ElementVectorH1(ElementQuad2()) * ElementQuad1()
-
-    if "Fluid" not in mesh.subdomains:
-        raise ValueError("Mesh missing 'Fluid' subdomain.")
-
-    basis = Basis(mesh, element, elements=mesh.subdomains["Fluid"])
-    print(f"  -> Total DOFs: {basis.N}")
-
-    # --- Boundary Conditions ---
-    print("Setting up Boundary Conditions...")
-    dofs = basis.get_dofs(mesh.boundaries)
+def _get_inlet_dofs(basis, dofs, idx_u, idx_v):
+    """Setup inlet velocity profile and return indices/values."""
     u_inlet_vec = np.zeros(basis.N)
-
-    # Indices helper
-    idx_u = basis.split_indices()[0][basis.split_bases()[0].split_indices()[0]]
-    idx_v = basis.split_indices()[0][basis.split_bases()[0].split_indices()[1]]
-
-    # 1. Inlet
     u_inlet_dofs = np.array([], dtype=int)
     v_inlet_dofs = np.array([], dtype=int)
+
     if "Inlet" in dofs:
         inlet_nodes = dofs["Inlet"].all()
         u_inlet_dofs = np.intersect1d(inlet_nodes, idx_u)
@@ -160,12 +146,15 @@ def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
         y_coords = basis.doflocs[1, u_inlet_dofs]
         if len(y_coords) > 0:
             y_min, y_max = y_coords.min(), y_coords.max()
-            H = y_max - y_min
+            h_height = y_max - y_min
             y_mid = (y_max + y_min) / 2.0
-            u_profile = VEL_INLET * (1.0 - (2.0 * (y_coords - y_mid) / H) ** 2)
+            u_profile = VEL_INLET * (1.0 - (2.0 * (y_coords - y_mid) / h_height) ** 2)
             u_inlet_vec[u_inlet_dofs] = u_profile
+    return u_inlet_vec, u_inlet_dofs, v_inlet_dofs
 
-    # 2. Walls
+
+def _get_wall_and_ghost_dofs(basis, dofs, idx_u, idx_v):
+    """Setup wall and ghost DOFs indices."""
     wall_dofs = np.array([], dtype=int)
     for b_name in ["Walls", "SolidInterfaces"]:
         if b_name in dofs:
@@ -178,73 +167,95 @@ def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
                 ]
             )
 
-    # 3. Solid Ghost Nodes
     fluid_dofs_indices = np.unique(basis.element_dofs)
-    all_dofs = np.arange(basis.N)
-    solid_ghost_dofs = np.setdiff1d(all_dofs, fluid_dofs_indices)
+    solid_ghost_dofs = np.setdiff1d(np.arange(basis.N), fluid_dofs_indices)
+    return wall_dofs, solid_ghost_dofs
 
-    # Compile Dirichlet DOFs
-    D_dofs = np.unique(
-        np.concatenate([u_inlet_dofs, v_inlet_dofs, wall_dofs, solid_ghost_dofs])
+
+def get_boundary_dofs(basis: Basis, mesh: Mesh):
+    """Compute Dirichlet DOFs for fluid solver."""
+    dofs = basis.get_dofs(mesh.boundaries)
+    idxs = basis.split_indices()[0]
+    idx_u, idx_v = idxs[basis.split_bases()[0].split_indices()]
+
+    u_inlet_vec, u_inlet_dofs, v_inlet_dofs = _get_inlet_dofs(basis, dofs, idx_u, idx_v)
+    wall_dofs, ghost_dofs = _get_wall_and_ghost_dofs(basis, dofs, idx_u, idx_v)
+
+    d_dofs = np.unique(
+        np.concatenate([u_inlet_dofs, v_inlet_dofs, wall_dofs, ghost_dofs])
     ).astype(int)
 
-    # Init Solution
-    x_sol = u_inlet_vec.copy()
+    return d_dofs, u_inlet_vec
 
-    # --- Solver Loop ---
-    # Viscosity stepping (Continuation Method)
-    viscosities = np.geomspace(5e-2, NU, 8)
 
-    print("Initializing with Penalized Stokes...")
-    # Pass params via kwargs (handled as 'w' in form)
-    A_s = asm(stokes_flow, basis, nu=viscosities[0])
-    b_s = asm(rhs_zero, basis)
-    x_sol = solve(*condense(A_s, b_s, x=x_sol, D=D_dofs))
-    print("  -> Stokes initialization successful.")
-
-    print(f"\nStarting Solver Loop. Target Nu={NU:.2e}")
-
+def run_solver_loop(basis, x_sol, d_dofs, viscosities):
+    """Run the iteration loop for Navier-Stokes solver."""
     for step_idx, nu_curr in enumerate(viscosities):
         print(f"\n--- STEP {step_idx+1}/{len(viscosities)}: Nu = {nu_curr:.2e} ---")
-        relax = 0.7
 
         for i in range(MAX_ITERS):
-            # Interpolate previous solution for convection
-            x_prev_func = basis.interpolate(x_sol)
-
-            # Assemble Newton (pass params explicitly)
-            A_mat = asm(
-                navier_stokes_lhs, basis, u_prev=x_prev_func[0], nu=nu_curr, h=MESH_SIZE
-            )
-            b_vec = asm(
-                navier_stokes_rhs, basis, u_prev=x_prev_func[0], nu=nu_curr, h=MESH_SIZE
-            )
-
+            args = {
+                "u_prev": basis.interpolate(x_sol)[0],
+                "nu": nu_curr,
+                "h": MESH_SIZE,
+            }
             try:
-                x_new_cand = solve(*condense(A_mat, b_vec, x=x_sol, D=D_dofs))
-            except RuntimeError as e:
-                print(f"  Solver failed (Singular?): {e}")
+                # Assemble and Solve with Relaxation
+                x_new = (
+                    0.7
+                    * solve(
+                        *condense(
+                            asm(navier_stokes_lhs, basis, **args),
+                            asm(navier_stokes_rhs, basis, **args),
+                            x=x_sol,
+                            D=d_dofs,
+                        )
+                    )
+                    + 0.3 * x_sol
+                )
+            except RuntimeError as err:
+                print(f"  Solver failed (Singular?): {err}")
                 break
 
-            # Relaxation
-            x_new = relax * x_new_cand + (1.0 - relax) * x_sol
-
-            # Convergence Check
-            diff = np.linalg.norm(x_new - x_sol)
-            sol_norm = np.linalg.norm(x_new)
-            rel_error = diff / (sol_norm + 1e-12)
-
+            rel_error = np.linalg.norm(x_new - x_sol) / (np.linalg.norm(x_new) + 1e-12)
             x_sol = x_new
-
-            ux_idx, uy_idx, _ = basis.nodal_dofs
-            max_vel = np.max(
-                np.linalg.norm(np.stack([x_sol[ux_idx], x_sol[uy_idx]]), axis=0)
-            )
+            u_i, v_i, _ = basis.nodal_dofs
+            max_vel = np.max(np.linalg.norm(np.stack([x_sol[u_i], x_sol[v_i]]), axis=0))
             print(f"  Iter {i+1:2d}: err={rel_error:.2e}, max_u={max_vel:.3f}")
 
             if rel_error < TOL:
                 print("  Convergence reached.")
                 break
+    return x_sol
+
+
+def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
+    """
+    Solves Navier-Stokes on the Fluid subdomain.
+    """
+    print("Initializing Finite Elements...")
+    element = ElementVectorH1(ElementQuad2()) * ElementQuad1()
+
+    if "Fluid" not in mesh.subdomains:
+        raise ValueError("Mesh missing 'Fluid' subdomain.")
+
+    basis = Basis(mesh, element, elements=mesh.subdomains["Fluid"])
+    print(f"  -> Total DOFs: {basis.N}")
+
+    print("Setting up Boundary Conditions...")
+    d_dofs, x_sol = get_boundary_dofs(basis, mesh)
+
+    # Viscosity stepping (Continuation Method)
+    viscosities = np.geomspace(5e-2, NU, 8)
+
+    print("Initializing with Penalized Stokes...")
+    a_stokes = asm(stokes_flow, basis, nu=viscosities[0])
+    b_stokes = asm(rhs_zero, basis)
+    x_sol = solve(*condense(a_stokes, b_stokes, x=x_sol, D=d_dofs))
+    print("  -> Stokes initialization successful.")
+
+    print(f"\nStarting Solver Loop. Target Nu={NU:.2e}")
+    x_sol = run_solver_loop(basis, x_sol, d_dofs, viscosities)
 
     return x_sol, basis
 
@@ -254,44 +265,40 @@ def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
 # =============================================================================
 
 
-def main():
-    mesh = get_mesh()
+def _plot_fluid_results(mesh, basis, x_sol, out_dir):
+    """Internal helper to plot fluid simulation results."""
+    u_idx, v_idx, p_idx = basis.nodal_dofs
+    u_sol = np.stack([x_sol[u_idx], x_sol[v_idx]]).T
 
-    # Run solver
-    x_sol, basis = solve_fluid(mesh)
+    mesh.save(
+        str(out_dir / "fluid_solution.vtk"),
+        {"velocity": u_sol, "pressure": x_sol[p_idx]},
+    )
 
-    # --- Post-Processing / Plotting ---
-    print("\nGenerating Output...")
-    out_dir = Path(OUTPUT_FOLDER)
-
-    ux_idx, uy_idx, p_idx = basis.nodal_dofs
-    u_sol = np.stack([x_sol[ux_idx], x_sol[uy_idx]]).T
-
-    # Save VTK
-    vtk_path = out_dir / "fluid_solution.vtk"
-    mesh.save(str(vtk_path), {"velocity": u_sol, "pressure": x_sol[p_idx]})
-
-    # Plot Image
     fig, ax = plt.subplots(1, 1, figsize=(10, 5))
     val_mag = np.linalg.norm(u_sol, axis=1)
 
     plot(mesh, val_mag, ax=ax, cmap="turbo", shading="gouraud")
     draw(mesh, ax=ax, color="gray", alpha=0.1, linewidth=0.05)
     draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.0)
-
     ax.set_aspect("equal", adjustable="box")
     ax.set_axis_off()
 
-    # Colorbar
-    vmin, vmax = val_mag.min(), val_mag.max()
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    norm = mcolors.Normalize(vmin=val_mag.min(), vmax=val_mag.max())
     s_map = cm.ScalarMappable(norm=norm, cmap="turbo")
     s_map.set_array([])
-    cbar = fig.colorbar(s_map, ax=ax)
-    cbar.set_label("Velocity Magnitude [m/s]")
+    fig.colorbar(s_map, ax=ax).set_label("Velocity Magnitude [m/s]")
 
     plt.savefig(out_dir / "fluid_velocity.png", dpi=350, bbox_inches="tight")
     plt.close(fig)
+
+
+def main():
+    """Main function for standalone testing of fluid solver."""
+    mesh = get_mesh()
+    x_sol, basis = solve_fluid(mesh)
+    print("\nGenerating Output...")
+    _plot_fluid_results(mesh, basis, x_sol, Path(OUTPUT_FOLDER))
     print("Simulation completed.")
 
 
