@@ -246,7 +246,7 @@ def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
     d_dofs, x_sol = get_boundary_dofs(basis, mesh)
 
     # Viscosity stepping (Continuation Method)
-    viscosities = np.geomspace(5e-2, NU, 8)
+    viscosities = np.geomspace(5e-2, NU, 3)
 
     print("Initializing with Penalized Stokes...")
     a_stokes = asm(stokes_flow, basis, nu=viscosities[0])
@@ -264,42 +264,11 @@ def solve_fluid(mesh: Mesh) -> Tuple[np.ndarray, Basis]:
 # 3. Main Execution
 # =============================================================================
 
-
-def _plot_fluid_results(mesh, basis, x_sol, out_dir):
-    """Internal helper to plot fluid simulation results."""
-    u_idx, v_idx, p_idx = basis.nodal_dofs
-    u_sol = np.stack([x_sol[u_idx], x_sol[v_idx]]).T
-
-    mesh.save(
-        str(out_dir / "fluid_solution.vtk"),
-        {"velocity": u_sol, "pressure": x_sol[p_idx]},
-    )
-
-    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
-    val_mag = np.linalg.norm(u_sol, axis=1)
-
-    plot(mesh, val_mag, ax=ax, cmap="turbo", shading="gouraud")
-    draw(mesh, ax=ax, color="gray", alpha=0.1, linewidth=0.05)
-    draw(mesh, ax=ax, boundaries_only=True, color="black", linewidth=1.0)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_axis_off()
-
-    norm = mcolors.Normalize(vmin=val_mag.min(), vmax=val_mag.max())
-    s_map = cm.ScalarMappable(norm=norm, cmap="turbo")
-    s_map.set_array([])
-    fig.colorbar(s_map, ax=ax).set_label("Velocity Magnitude [m/s]")
-
-    plt.savefig(out_dir / "fluid_velocity.png", dpi=350, bbox_inches="tight")
-    plt.close(fig)
-
-
 def main():
     """Main function for standalone testing of fluid solver."""
     mesh = get_mesh()
     x_sol, basis = solve_fluid(mesh)
     print("\nGenerating Output...")
-    _plot_fluid_results(mesh, basis, x_sol, Path(OUTPUT_FOLDER))
-    print("Simulation completed.")
 
 
 if __name__ == "__main__":
