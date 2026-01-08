@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import qmc
 
 # Local imports
-from data import OUTPUT_FOLDER, MESH_SIZE, COMPONENT_TAGS
+from data import OUTPUT_FOLDER, MESH_SIZE, COMPONENT_TAGS,DATASET_FOLDER,N_SAMPLES,MAX_CPUS,PARAM_RANGES,DIMENSIONS
 from generate_mesh import CircuitBoard
 from solve_fluid import get_mesh, solve_fluid
 from solve_thermal import solve_thermal, _setup_material_properties
@@ -33,26 +33,6 @@ from skfem import Basis, ElementQuad1, ElementVectorH1, ElementQuad2
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
-
-DATASET_FOLDER = Path("dataset")
-N_SAMPLES = 200
-MAX_CPUS = 10
-
-# Parameter Ranges
-PARAM_RANGES = {
-    "k_comps": (200.0, 500.0),    # 5 values
-    "k_pcb": (0.01, 1.0),         # 1 value
-    "vel_inlet": (0.001, 0.01),  # 1 value
-    "h_pcb": (0.01, 0.1),         # 1 value
-    "w_pcb": (0.5, 0.85),        # 1 value
-    "n_up": (0, 5),               # 1 value (integer)
-    "w_comps": (0.1, 0.3),       # 5 values
-    "h_comps": (1.0, 1.5),        # 5 values
-    "q_comps": (100.0, 300.0),       # 5 values
-}
-
-# Total dimensions for Sobol: 5+1+1+1+1+1+5+5+5 = 25
-DIMENSIONS = 25
 
 def generate_samples(n_samples: int) -> np.ndarray:
     """Generate Sobol samples in [0, 1]^DIMENSIONS."""

@@ -5,7 +5,7 @@ Centralized physical parameters, mesh tags, and simulation settings.
 All constants are defined with clear units and documentation.
 Refactored for skfem (MPI removed).
 """
-
+from pathlib import Path
 from typing import Final, List
 
 # REMOVED: from mpi4py import MPI
@@ -83,6 +83,26 @@ OUTPUT_FOLDER: Final[str] = "results"
 MAX_ITERS: Final[int] = 25
 TOL: Final[float] = 5e-3
 K: Final[int] = 1  # Polynomial degree
+
+DATASET_FOLDER = Path("dataset")
+N_SAMPLES = 200
+MAX_CPUS = 10
+
+# Parameter Ranges
+PARAM_RANGES = {
+    "k_comps": (200.0, 500.0),    # 5 values
+    "k_pcb": (0.01, 1.0),         # 1 value
+    "vel_inlet": (0.001, 0.01),  # 1 value
+    "h_pcb": (0.01, 0.1),         # 1 value
+    "w_pcb": (0.5, 0.85),        # 1 value
+    "n_up": (0, 5),               # 1 value (integer)
+    "w_comps": (0.1, 0.3),       # 5 values
+    "h_comps": (1.0, 1.5),        # 5 values
+    "q_comps": (10.0, 30.0),       # 5 values
+}
+
+# Total dimensions for Sobol: 5+1+1+1+1+1+5+5+5 = 25
+DIMENSIONS = 25
 
 
 # =============================================================================
