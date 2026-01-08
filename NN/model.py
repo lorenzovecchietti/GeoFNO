@@ -13,10 +13,10 @@ torch.set_float32_matmul_precision("high")
 
 def collate_fn(batch):
     """
-    Funzione statica per gestire batch di mesh con numero variabile di nodi.
-    Da usare nel DataLoader: collate_fn=MeshToGridDataset.collate_fn
+    Static function to handle batches of meshes with variable number of nodes.
+    To be used in DataLoader: collate_fn=collate_fn
     """
-    # 1. Trova la dimensione massima N in questo batch
+    # 1. Find max number of nodes in this batch
     max_n = max(item["y_mesh"].shape[0] for item in batch)
 
     x_grids = []
@@ -25,24 +25,23 @@ def collate_fn(batch):
     masks = []
 
     for item in batch:
-        # x_grid è fissa (C, H, W), basta aggiungerla alla lista
+        # x_grid is fixed (C, H, W)
         x_grids.append(item["x_grid"])
 
-        # Recuperiamo i dati variabili
+        # Retrieve variable data
         y = item["y_mesh"]  # (N, out_channels)
         c = item["query_coords"]  # (N, 2)
         n = y.shape[0]
 
         padding_len = max_n - n
 
-        # --- Creazione Mask ---
-        # 1 = Dato reale, 0 = Padding
+        # Mask creation: 1 = Real data, 0 = Padding
         mask = torch.cat([torch.ones(n), torch.zeros(padding_len)], dim=0)
         masks.append(mask)
 
-        # --- Padding Dati ---
+        # Data Padding
         if padding_len > 0:
-            # Padding con zeri in fondo
+            # Zero padding at the end
             y_pad = torch.cat([y, torch.zeros(padding_len, y.shape[1])], dim=0)
             c_pad = torch.cat([c, torch.zeros(padding_len, c.shape[1])], dim=0)
         else:
@@ -151,7 +150,7 @@ class GeoFNO(nn.Module):
         """
         Forward pass of GeoFNO.
         """
-        # 1. Processing sulla Griglia Latente
+        # 1. Processing on Latent Grid
         # x_grid shape: (Batch, 5, H, W)
         x = self.fc0(x_grid)  # (B, width, H, W)
 
@@ -172,16 +171,13 @@ class GeoFNO(nn.Module):
 
         x1 = self.conv3(x)
         x2 = self.w3(x)
-        x = x1 + x2  # Output Latente su Griglia (B, width, H, W)
+        x = x1 + x2  # Latent output on grid (B, width, H, W)
 
-        # 2. Querying Geometrica (Grid -> Mesh)
-        # Vogliamo i valori non su tutta la griglia, ma sui nodi esatti della mesh.
-        # query_coords ha shape (B, N_points, 2) ma grid_sample vuole (B, 1, N_points, 2)
-        # Trattiamo i punti come una "immagine" di altezza 1 e larghezza N
+        # 2. Geometric Querying (Grid -> Mesh)
+        # query_coords shape: (B, N_points, 2), grid_sample expects (B, 1, N_points, 2)
         q = query_coords.unsqueeze(1)
 
-        # grid_sample campiona il tensore 'x' alle coordinate 'q'.
-        # mode='bilinear' interpola dolcemente i valori della griglia.
+        # Interpolate grid values at mesh node locations
         x_sampled = F.grid_sample(
             x, q, mode="bilinear", padding_mode="zeros", align_corners=False
         )
@@ -189,7 +185,7 @@ class GeoFNO(nn.Module):
 
         x_sampled = x_sampled.squeeze(2).permute(0, 2, 1)  # (B, N_points, width)
 
-        # 3. Decoder finale (point-wise)
+        # 3. Final Decoder (point-wise)
         x_sampled = self.fc1(x_sampled)
         x_sampled = F.gelu(x_sampled)
         out = self.fc2(x_sampled)  # (B, N_points, 4)
@@ -202,17 +198,15 @@ def train():
     Training loop for GeoFNO.
     """
     # Setup
-    # Quando crei il dataset nel tuo file main o di training:
     dataset = MeshToGridDataset(
         root_dir="./../data_generation/dataset",
         grid_size=(64, 64),
-        # Input: usa la chiave vista nella prima immagine
+        # Input keys from dataset
         input_keys=["conductivity", "power"],
-        # Output: usa le chiavi che il messaggio di errore ti ha elencato
+        # Output keys from dataset
         output_keys=["temperature", "pressure", "vx", "vy"],
     )
-    # Batch size 1 è spesso necessario se ogni mesh ha un numero diverso di nodi (N variabile).
-    # Se tutte le mesh hanno lo stesso N, puoi usare batch_size > 1.
+    # batch_size > 1 is possible if meshes have different N due to collate_fn padding
     dataloader = DataLoader(
         dataset,
         batch_size=32,

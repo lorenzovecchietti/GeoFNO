@@ -26,11 +26,11 @@ class MeshToGridDataset(Dataset):
     ):
         """
         Args:
-            root_dir (str): Cartella dati.
-            grid_size (tuple): Dimensione target della griglia.
-            normalize (bool): Se normalizzare i dati.
-            input_keys (list): Lista delle chiavi da estrarre dal dizionario di input.
-            output_keys (list): Lista delle chiavi da estrarre dal dizionario di output.
+            root_dir (str): Data directory.
+            grid_size (tuple): Target grid size.
+            normalize (bool): Whether to normalize data.
+            input_keys (list): Keys to extract from input dictionary.
+            output_keys (list): Keys to extract from output dictionary.
         """
         self.root_dir = root_dir
         self.grid_size = grid_size
@@ -46,12 +46,12 @@ class MeshToGridDataset(Dataset):
             ]
         )
 
-        # Grid fissa [0,1]
+        # Fixed grid [0,1]
         xi = np.linspace(0, 1, grid_size[1])
         yi = np.linspace(0, 1, grid_size[0])
         self.grid_x, self.grid_y = np.meshgrid(xi, yi)
 
-        # Inizializzazione statistiche
+        # Stats initialization
         self.input_mean = None
         self.input_std = None
         self.output_mean = None
@@ -61,7 +61,7 @@ class MeshToGridDataset(Dataset):
             self._compute_or_load_stats()
 
     def _extract_data_from_dict(self, file_path, keys):
-        """Carica il file .npy ed estrae le chiavi richieste."""
+        """Load .npy file and extract requested keys."""
         data_obj = np.load(file_path, allow_pickle=True)
 
         if data_obj.ndim == 0:
@@ -91,18 +91,18 @@ class MeshToGridDataset(Dataset):
         return np.concatenate(extracted_arrays, axis=1)
 
     def _compute_or_load_stats(self):
-        """Calcola (o carica) media e std per normalizzare i dati."""
+        """Compute (or load) mean and std for data normalization."""
         stats_path = os.path.join(self.root_dir, "stats.pt")
 
         if os.path.exists(stats_path):
-            print(f"Caricamento statistiche da {stats_path}...")
+            print(f"Loading statistics from {stats_path}...")
             stats = torch.load(stats_path)
             self.input_mean = stats["input_mean"]
             self.input_std = stats["input_std"]
             self.output_mean = stats["output_mean"]
             self.output_std = stats["output_std"]
         else:
-            print("Calcolo statistiche sul dataset (può richiedere tempo)...")
+            print("Computing dataset statistics (this may take some time)...")
             in_data_list = []
             out_data_list = []
 
@@ -137,7 +137,7 @@ class MeshToGridDataset(Dataset):
                 },
                 stats_path,
             )
-            print("Statistiche calcolate e salvate.")
+            print("Statistics computed and saved.")
 
     def denormalize_output(self, tensor):
         """
@@ -161,39 +161,37 @@ class MeshToGridDataset(Dataset):
             case_path, f"grid_{self.grid_size[0]}x{self.grid_size[1]}.npy"
         )
 
-        # 1. Caricamento Mesh (sempre necessario per query_coords)
+        # 1. Mesh loading (required for query_coords)
         mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
         points = mesh.points[:, :2].astype(np.float32)
 
-        # 2. Caricamento Dati Output e Query Coords
+        # 2. Load Output Data and Query Coords
         output_nodes = self._extract_data_from_dict(
             os.path.join(case_path, "solutions.npy"), self.output_keys
         ).astype(np.float32)
 
-        # Normalizzazione Coordinate Spaziali
+        # Spatial normalization
         min_pos = points.min(axis=0)
         max_pos = points.max(axis=0)
         norm_points = (points - min_pos) / (max_pos - min_pos + 1e-8)
         query_coords = norm_points * 2 - 1
 
-        # 3. Gestione Cache per Input Grid
+        # 3. Cache management for Input Grid
         if os.path.exists(grid_cache_path):
             input_grid = np.load(grid_cache_path)
         else:
-            # Caricamento Dati Input per Interpolazione
             input_nodes = self._extract_data_from_dict(
                 os.path.join(case_path, "inputs.npy"), self.input_keys
             ).astype(np.float32)
 
-            # Normalizzazione Input
+            # Input normalization
             if self.normalize:
-                # Usiamo torch per comodità visto che mean/std sono tensor
                 input_nodes_t = (
                     torch.tensor(input_nodes) - self.input_mean
                 ) / self.input_std
                 input_nodes = input_nodes_t.numpy()
 
-            # Interpolazione Input su Griglia
+            # Interpolate Input on Regular Grid
             grid_channels = []
             for i in range(input_nodes.shape[1]):
                 grid_c = griddata(
@@ -218,10 +216,9 @@ class MeshToGridDataset(Dataset):
             grid_channels.append(grid_mask)
             input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
 
-            # Salvataggio in Cache
             np.save(grid_cache_path, input_grid)
 
-        # 4. Normalizzazione Output
+        # 4. Output Normalization
         if self.normalize:
             output_nodes = (
                 torch.tensor(output_nodes) - self.output_mean
