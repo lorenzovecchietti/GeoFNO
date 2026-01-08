@@ -218,7 +218,7 @@ def assign_boundary_physical_groups(
         gmsh.model.addPhysicalGroup(1, inlet, INLET_TAG)
         gmsh.model.setPhysicalName(1, INLET_TAG, "Inlet")
     if outlet:
-        gmsh.model.addPhysicalGroup(1, outlet, INLET_TAG)
+        gmsh.model.addPhysicalGroup(1, outlet, OUTLET_TAG)
         gmsh.model.setPhysicalName(1, OUTLET_TAG, "Outlet")
     if walls:
         gmsh.model.addPhysicalGroup(1, walls, WALLS_TAG)
