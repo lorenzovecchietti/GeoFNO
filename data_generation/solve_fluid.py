@@ -1,5 +1,5 @@
 """
-solve_fluid.py - Optimized Version (Split Assembly + Fast Solver + Numba)
+Navier-Stokes fluid solver using skfem and Numba acceleration.
 """
 
 import time
@@ -7,15 +7,11 @@ import warnings
 from pathlib import Path
 from typing import Tuple
 
+import numba
 import numpy as np
-import numba  # <--- NEW: Numba import
-
-# Local imports
 from data import MAX_ITERS, MESH_FILE, MESH_SIZE, NU, OUTPUT_FOLDER, TOL, VEL_INLET
 from generate_mesh import CircuitBoard, generate_gmsh_mesh_2d
 from pypardiso import spsolve
-
-# Explicit imports
 from skfem import (
     Basis,
     BilinearForm,
@@ -27,86 +23,54 @@ from skfem import (
     asm,
     condense,
 )
-from skfem.helpers import div, dot, grad, inner
+from skfem.helpers import div, grad, inner
 
-# Suppress skfem warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-# =============================================================================
-# 0. Numba Kernels
-# =============================================================================
-
-@numba.jit(nopython=True, fastmath=True, cache=True)
-def _navier_dynamic_kernel(u_grad, p_grad, v_val, v_grad, u_prev, nu, h, delta_supg, delta_graddiv):
-    """
-    Kernel JIT per Navier-Stokes iterativo:
-    Calcola Convection + SUPG + GradDiv in un singolo passaggio ottimizzato.
-    """
-    # u_grad shape: (2, 2, N_points). indices: [component_u, deriv_dir, point]
-    # v_val shape: (2, N_points)
-    # v_grad shape: (2, 2, N_points)
-    # u_prev shape: (2, N_points)
-    
-    # 1. Convection Picard: (u_prev . grad(u)) . v
-    # (u_prev[0]*du/dx + u_prev[1]*du/dy) * v[0] ...
-    
-    # Calcolo (u_prev . grad) applicato a u_x e u_y
-    # du_x / dt_streamline
-    u_adv_x = u_prev[0] * u_grad[0, 0] + u_prev[1] * u_grad[0, 1] 
-    # du_y / dt_streamline
-    u_adv_y = u_prev[0] * u_grad[1, 0] + u_prev[1] * u_grad[1, 1]
-    
-    convection = u_adv_x * v_val[0] + u_adv_y * v_val[1]
-
-    # 2. SUPG Parameter Calculation
-    u_mag_sq = u_prev[0]**2 + u_prev[1]**2
-    u_mag = np.sqrt(u_mag_sq + 1e-12)
-    
-    # Tau formula
-    # (2|u|/h)^2
-    term1 = (2.0 * u_mag / h)**2
-    # (9 * 4nu / h^2)^2
-    term2 = (36.0 * nu / (h*h))**2
-    
-    tau = delta_supg / np.sqrt(term1 + term2 + 1e-15)
-
-    # 3. SUPG Residuals & Test Function
-    # Res_x = (u_prev . grad(u))_x + dp/dx
-    res_x = u_adv_x + p_grad[0]
-    res_y = u_adv_y + p_grad[1]
-    
-    # Streamline derivative of test function v: (u_prev . grad(v))
-    v_stream_x = u_prev[0] * v_grad[0, 0] + u_prev[1] * v_grad[0, 1]
-    v_stream_y = u_prev[0] * v_grad[1, 0] + u_prev[1] * v_grad[1, 1]
-    
-    supg_term = tau * (res_x * v_stream_x + res_y * v_stream_y)
-    
-    # 4. Grad-Div Stabilization
-    # div(u) = du_x/dx + du_y/dy
-    div_u = u_grad[0, 0] + u_grad[1, 1]
-    div_v = v_grad[0, 0] + v_grad[1, 1]
-    
-    graddiv_term = delta_graddiv * u_mag * h * div_u * div_v
-    
-    return convection + supg_term + graddiv_term
-
-# =============================================================================
-# 1. Weak Forms - SPLIT FOR SPEED
-# =============================================================================
-# Stabilization params
+# Stabilization parameters
 DELTA_SUPG = 0.5
 DELTA_GRADDIV = 0.1
 EPS_PENALTY = 1e-6
 
 
+@numba.jit(nopython=True, fastmath=True, cache=True)
+def _navier_dynamic_kernel(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    u_grad, p_grad, v_val, v_grad, u_prev, nu, h, delta_supg, delta_graddiv
+):
+    """
+    JIT Kernel for iterative Navier-Stokes:
+    Calculates Convection + SUPG + GradDiv in a single optimized pass.
+    """
+    # 1. Picard Convection: (u_prev . grad(u)) . v
+    u_adv_x = u_prev[0] * u_grad[0, 0] + u_prev[1] * u_grad[0, 1]
+    u_adv_y = u_prev[0] * u_grad[1, 0] + u_prev[1] * u_grad[1, 1]
+    convection = u_adv_x * v_val[0] + u_adv_y * v_val[1]
+
+    # 2. SUPG Parameter (Tau)
+    u_mag_sq = u_prev[0] ** 2 + u_prev[1] ** 2
+    u_mag = np.sqrt(u_mag_sq + 1e-12)
+    term1 = (2.0 * u_mag / h) ** 2
+    term2 = (36.0 * nu / (h * h)) ** 2
+    tau = delta_supg / np.sqrt(term1 + term2 + 1e-15)
+
+    # 3. SUPG Stabilization Terms
+    res_x = u_adv_x + p_grad[0]
+    res_y = u_adv_y + p_grad[1]
+    v_stream_x = u_prev[0] * v_grad[0, 0] + u_prev[1] * v_grad[0, 1]
+    v_stream_y = u_prev[0] * v_grad[1, 0] + u_prev[1] * v_grad[1, 1]
+    supg_term = tau * (res_x * v_stream_x + res_y * v_stream_y)
+
+    # 4. Grad-Div Stabilization
+    div_u = u_grad[0, 0] + u_grad[1, 1]
+    div_v = v_grad[0, 0] + v_grad[1, 1]
+    graddiv_term = delta_graddiv * u_mag * h * div_u * div_v
+
+    return convection + supg_term + graddiv_term
+
+
 @BilinearForm
 def stokes_static(u, p, v, q, w):
-    """
-    PART A: STATIC TERMS
-    Depends only on 'w.nu' and mesh geometry.
-    This is linear, skfem's default numpy broadcasting is fast enough here
-    since it runs only once per viscosity step.
-    """
+    """Static terms of the Stokes equations."""
     return (
         w.nu * inner(grad(u), grad(v)) - p * div(v) - q * div(u) - EPS_PENALTY * p * q
     )
@@ -114,36 +78,28 @@ def stokes_static(u, p, v, q, w):
 
 @BilinearForm
 def navier_dynamic(u, p, v, _q, w):
-    """
-    PART B: DYNAMIC TERMS (Non-Linear)
-    Depends on 'w.u_prev'. Calls Numba Kernel.
-    """
+    """Non-linear dynamic terms of Navier-Stokes equations via Numba kernel."""
     return _navier_dynamic_kernel(
-        u.grad,             # (2, 2, N)
-        p.grad,             # (2, N)
-        v.value,            # (2, N)
-        v.grad,             # (2, 2, N)
-        w.u_prev,           # (2, N)
-        w.nu,               # float/scalar broadcasted
-        MESH_SIZE,          # constant
-        DELTA_SUPG,         # constant
-        DELTA_GRADDIV       # constant
+        u.grad,
+        p.grad,
+        v.value,
+        v.grad,
+        w.u_prev,
+        w.nu,
+        MESH_SIZE,
+        DELTA_SUPG,
+        DELTA_GRADDIV,
     )
 
 
 @LinearForm
 def navier_stokes_rhs(_v, _q, _w):
-    """Zero RHS for Navier-Stokes."""
+    """Zero RHS for Navier-Stokes solver."""
     return 0.0
 
 
-# =============================================================================
-# 2. Helper Functions (Unchanged)
-# =============================================================================
-
-
-def get_mesh(cb: CircuitBoard = None, mesh_path: Path = None) -> Mesh:
-    """Load or generate the mesh."""
+def get_mesh(cb: CircuitBoard | None = None, mesh_path: Path | None = None) -> Mesh:
+    """Load an existing mesh or generate a new one if not found."""
     if mesh_path is None:
         out_dir = Path(OUTPUT_FOLDER)
         out_dir.mkdir(exist_ok=True, parents=True)
@@ -167,6 +123,7 @@ def get_mesh(cb: CircuitBoard = None, mesh_path: Path = None) -> Mesh:
 
 
 def _get_inlet_dofs(basis, dofs, idx_u, idx_v, vel_inlet=VEL_INLET):
+    """Compute and assign inlet velocity profile."""
     u_inlet_vec = np.zeros(basis.N)
     u_inlet_dofs = np.array([], dtype=int)
     v_inlet_dofs = np.array([], dtype=int)
@@ -186,15 +143,18 @@ def _get_inlet_dofs(basis, dofs, idx_u, idx_v, vel_inlet=VEL_INLET):
     return u_inlet_dofs, v_inlet_dofs, u_inlet_vec
 
 
-def get_boundary_dofs(basis: Basis, mesh: Mesh, vel_inlet=VEL_INLET):
-    """Compute Dirichlet DOFs for fluid solver."""
+def get_boundary_dofs(
+    basis: Basis, mesh: Mesh, vel_inlet=VEL_INLET
+):  # pylint: disable=too-many-locals
+    """Compute Dirichlet DOFs for the fluid mesh (Inlet, Walls, Interfaces)."""
     dofs = basis.get_dofs(mesh.boundaries)
     idxs = basis.split_indices()[0]
     idx_u, idx_v = idxs[basis.split_bases()[0].split_indices()]
 
-    u_inlet_dofs, v_inlet_dofs, u_inlet_vec = _get_inlet_dofs(basis, dofs, idx_u, idx_v, vel_inlet)
+    u_inlet_dofs, v_inlet_dofs, u_inlet_vec = _get_inlet_dofs(
+        basis, dofs, idx_u, idx_v, vel_inlet
+    )
 
-    # Wall & Ghost Setup
     wall_dofs = np.array([], dtype=int)
     for b_name in ["Walls", "SolidInterfaces"]:
         if b_name in dofs:
@@ -218,9 +178,8 @@ def get_boundary_dofs(basis: Basis, mesh: Mesh, vel_inlet=VEL_INLET):
 
 
 def _picard_iteration(basis, x_sol, a_static, d_dofs, nu_curr):
-    """Perform a single Picard iteration."""
+    """Perform a single Picard iteration with Numba-accelerated assembly."""
     try:
-        # Numba-optimized assembly
         a_dynamic = asm(
             navier_dynamic,
             basis,
@@ -237,21 +196,18 @@ def _picard_iteration(basis, x_sol, a_static, d_dofs, nu_curr):
         )
         i_dof = basis.complement_dofs(d_dofs)
         x_new = x_sol.copy()
-        
-        # PyPardiso Solver
+
         x_new[i_dof] = x_sol[i_dof] + spsolve(
             a_condensed, b_c - a_condensed @ x_sol[i_dof]
         )
         return 0.7 * x_new + 0.3 * x_sol, x_new
     except RuntimeError as err:
-        print(f"  Solver failed (Singular?): {err}")
+        print(f"  Solver failed: {err}")
         return None, None
 
 
 def run_solver_loop(basis, x_sol, d_dofs, viscosities):
-    """
-    Run the iteration loop for Navier-Stokes solver.
-    """
+    """Iterative loop for solving Navier-Stokes equations."""
     for step_idx, nu_curr in enumerate(viscosities):
         print(f"\n--- STEP {step_idx + 1}/{len(viscosities)}: Nu = {nu_curr:.2e} ---")
 
@@ -267,13 +223,12 @@ def run_solver_loop(basis, x_sol, d_dofs, viscosities):
             if x_sol_new is None:
                 break
 
-            # Check Convergence
             rel_error = np.linalg.norm(x_new - x_sol) / (np.linalg.norm(x_new) + 1e-12)
             x_sol = x_sol_new
 
             print(
                 f"  Iter {i + 1:2d}: err={rel_error:.2e}"
-                + f" ({time.time() - t_iter_start:.3f}s)"
+                + f"({time.time() - t_iter_start:.3f}s)"
             )
 
             if rel_error < TOL:
@@ -284,11 +239,8 @@ def run_solver_loop(basis, x_sol, d_dofs, viscosities):
 
 
 def solve_fluid(mesh: Mesh, vel_inlet=VEL_INLET) -> Tuple[np.ndarray, Basis]:
-    """
-    Solves Navier-Stokes on the Fluid subdomain.
-    """
+    """Solve Navier-Stokes on the Fluid subdomain."""
     print("Initializing Finite Elements...")
-    # Quad2 (Velocity) + Quad1 (Pressure) = Taylor-Hood elements
     element = ElementVectorH1(ElementQuad2()) * ElementQuad1()
 
     if "Fluid" not in mesh.subdomains:
@@ -300,34 +252,26 @@ def solve_fluid(mesh: Mesh, vel_inlet=VEL_INLET) -> Tuple[np.ndarray, Basis]:
     print("Setting up Boundary Conditions...")
     d_dofs, x_sol = get_boundary_dofs(basis, mesh, vel_inlet)
 
-    # Viscosity stepping (Continuation Method)
     viscosities = np.geomspace(5e-2, NU, 3)
 
-    print("Initializing with Stokes (Static)...")
+    print("Initializing with Stokes...")
     a_init = asm(stokes_static, basis, nu=viscosities[0])
     b_init = asm(navier_stokes_rhs, basis)
 
-    # Solve initial Stokes with PyPardiso
     a_condensed, b_c = condense(a_init, b_init, x=x_sol, D=d_dofs, expand=False)
     x_sol_c = spsolve(a_condensed, b_c)
     i_dof = basis.complement_dofs(d_dofs)
     x_sol[i_dof] = x_sol_c
 
     print("  -> Stokes initialization successful.")
-
     print(f"\nStarting Solver Loop (Numba Accelerated). Target Nu={NU:.2e}")
     x_sol = run_solver_loop(basis, x_sol, d_dofs, [viscosities[-1]])
 
     return x_sol, basis
 
 
-# =============================================================================
-# 3. Main Execution
-# =============================================================================
-
-
 def main():
-    """Main function for standalone testing of fluid solver."""
+    """Main function for standalone testing."""
     mesh = get_mesh()
     solve_fluid(mesh)
     print("\nGeneration Complete.")
