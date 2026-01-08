@@ -40,6 +40,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 warnings.filterwarnings("ignore")
 
+
 def generate_samples(n_samples: int) -> np.ndarray:
     """Generate Sobol samples in [0, 1]^DIMENSIONS."""
     sampler = qmc.Sobol(d=DIMENSIONS, scramble=True)
