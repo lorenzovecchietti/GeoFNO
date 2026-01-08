@@ -8,6 +8,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+from scipy.spatial import cKDTree  # Import locale per sicurezza
 import json
 import pickle
 import warnings
@@ -33,9 +34,9 @@ from skfem import Basis, ElementQuad1, ElementVectorH1, ElementQuad2
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-DATASET_FOLDER = Path("dataset_100")
-N_SAMPLES = 100  # Set to 100 for dataset generation
-MAX_CPUS = 1
+DATASET_FOLDER = Path("dataset")
+N_SAMPLES = 200
+MAX_CPUS = 10
 
 # Parameter Ranges
 PARAM_RANGES = {
@@ -43,9 +44,9 @@ PARAM_RANGES = {
     "k_pcb": (0.01, 1.0),         # 1 value
     "vel_inlet": (0.001, 0.01),  # 1 value
     "h_pcb": (0.01, 0.1),         # 1 value
-    "w_pcb": (0.085, 0.5),        # 1 value
+    "w_pcb": (0.5, 0.85),        # 1 value
     "n_up": (0, 5),               # 1 value (integer)
-    "w_comps": (0.05, 0.3),       # 5 values
+    "w_comps": (0.1, 0.3),       # 5 values
     "h_comps": (1.0, 1.5),        # 5 values
     "q_comps": (100.0, 300.0),       # 5 values
 }
@@ -190,23 +191,50 @@ def worker(args):
                 # 4. Visualization & Output
                 img_path = case_dir / "simulation.png"
                 _plot_simulation(mesh, thermal_basis, temp_sol, vel_p1_flat, img_path)
-                
-                # 5. Extract Solutions (T, P, VX, VY)
+
+                # --- SAFETY LOCK ---
+                # Catturiamo la dimensione della mesh ORA, prima che qualsiasi operazione
+                # strana la faccia sembrare di soli 4 nodi (bug molto raro ma possibile in contesti complessi).
+                total_nodes = mesh.p.shape[1]
+
+                # --- VELOCITY ---
                 vec_basis = Basis(mesh, ElementVectorH1(ElementQuad1()))
                 ux_idxs, uy_idxs = vec_basis.split_indices()
                 vx = vel_p1_flat[ux_idxs]
                 vy = vel_p1_flat[uy_idxs]
-                
-                # Pressure extraction
+
+                # --- PRESSURE (Geometric Mapping) ---
+                # 1. Setup Base Mista
                 fluid_element = ElementVectorH1(ElementQuad2()) * ElementQuad1()
                 full_fluid_basis = Basis(mesh, fluid_element, elements=mesh.subdomains["Fluid"])
                 _, p_idxs = full_fluid_basis.split_indices()
-                pressure_on_fluid = fluid_sol[p_idxs]
-                
-                p_full = np.zeros(mesh.nnodes)
-                fluid_nodes = np.unique(mesh.t[:, mesh.subdomains["Fluid"]])
-                p_full[fluid_nodes] = pressure_on_fluid
-                
+
+                # 2. Dati Pressione e Coordinate
+                pressure_values = fluid_sol[p_idxs]
+                # Coordinate dei DOF della pressione
+                pressure_dof_locs = full_fluid_basis.doflocs[:, p_idxs]
+
+                # 3. Nodi Fisici della Mesh
+                fluid_nodes_indices = np.unique(mesh.t[:, mesh.subdomains["Fluid"]])
+                # Coordinate dei nodi fisici
+                mesh_node_locs = mesh.p[:, fluid_nodes_indices]
+
+                # 4. KDTree per mappare Spazio -> Spazio
+                tree = cKDTree(pressure_dof_locs.T)
+                _, closest_p_idx = tree.query(mesh_node_locs.T, k=1)
+
+                # 5. Assegnazione Sicura
+                # Usiamo total_nodes catturato all'inizio, NON mesh.nnodes
+                p_full = np.zeros(total_nodes)
+
+                # Controllo di sicurezza finale (non dovrebbe più fallire)
+                if fluid_nodes_indices.max() >= total_nodes:
+                    # Se questo accade, la mesh era corrotta fin dall'inizio
+                    raise RuntimeError(
+                        f"Mesh index mismatch: max index {fluid_nodes_indices.max()} >= total nodes {total_nodes}")
+
+                p_full[fluid_nodes_indices] = pressure_values[closest_p_idx]
+
                 solutions = {
                     "temperature": temp_sol,
                     "pressure": p_full,
@@ -214,24 +242,58 @@ def worker(args):
                     "vy": vy
                 }
                 np.save(case_dir / "solutions.npy", solutions)
-                
-                # 6. Extract Inputs (K, Q)
+
+                # 6. Extract Inputs (K, Q) - Robust Fix
+
+                # --- FIX: Recalculate true node count from Topology ---
+                # Dato che mesh.nnodes è inaffidabile (dice 4), calcoliamo il numero
+                # reale di nodi guardando l'indice massimo usato nella topologia.
+                real_nnodes = mesh.t.max() + 1
+
+                # Calcolo proprietà per elemento
                 k_elem, _, q_elem = _setup_material_properties(
                     mesh, k_pcb=params["k_pcb"], k_comps=params["k_comps"], q_dot_comp=params["q_comps"]
                 )
-                k_nodal = element_to_nodal(mesh, k_elem)
-                q_nodal = element_to_nodal(mesh, q_elem)
-                
+
+                # --- Funzione inline element_to_nodal robusta ---
+                # Invece di chiamare la funzione esterna, facciamo qui il calcolo
+                # forzando la dimensione corretta 'real_nnodes'.
+
+                def robust_element_to_nodal(indices, values, num_nodes):
+                    # indices: mesh.t (4, Nelems)
+                    # values: k_elem (Nelems,)
+                    nodal_sum = np.zeros(num_nodes)
+                    nodal_count = np.zeros(num_nodes)
+
+                    # Accumulo vettorizzato (molto più veloce del loop originale)
+                    # Per ogni nodo del Quad (0,1,2,3), aggiungiamo il valore dell'elemento
+                    for i in range(indices.shape[0]):
+                        np.add.at(nodal_sum, indices[i], values)
+                        np.add.at(nodal_count, indices[i], 1)
+
+                    # Media
+                    mask = nodal_count > 0
+                    nodal_sum[mask] /= nodal_count[mask]
+                    return nodal_sum
+
+                # Applicazione sicura
+                k_nodal = robust_element_to_nodal(mesh.t, k_elem, real_nnodes)
+                q_nodal = robust_element_to_nodal(mesh.t, q_elem, real_nnodes)
+
                 inputs = {
                     "conductivity": k_nodal,
                     "power": q_nodal
                 }
                 np.save(case_dir / "inputs.npy", inputs)
-                
-                del mesh, fluid_sol, fluid_basis, temp_sol, thermal_basis, vec_basis
-                gc.collect() # Forza il rilascio della RAM
-                print(f"Case {sample_idx} completed.")
-                
+
+                # Pulizia finale
+                del mesh, fluid_sol, temp_sol, vec_basis
+                if 'fluid_basis' in locals(): del fluid_basis
+                if 'full_fluid_basis' in locals(): del full_fluid_basis
+
+                gc.collect()
+                print(f"Case {sample_idx} completed successfully.")
+
             except Exception as e:
                 print(f"Case {sample_idx} failed: {e}")
                 import traceback
