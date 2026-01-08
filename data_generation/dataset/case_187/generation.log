@@ -1,0 +1,29 @@
+--- Starting Case 187 ---
+Generating mesh at dataset\case_187\mesh.msh...
+
+Initializing Finite Elements...
+  -> Total DOFs: 87565
+Setting up Boundary Conditions...
+Initializing with Stokes...
+  -> Stokes initialization successful.
+
+Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
+
+--- STEP 1/1: Nu = 1.00e-05 ---
+  Static Assembly: 12.6588s
+  Iter  1: err=5.59e-01(18.580s)
+  Iter  2: err=1.80e-01(17.969s)
+  Iter  3: err=7.56e-02(18.012s)
+  Iter  4: err=4.51e-02(17.996s)
+  Iter  5: err=3.08e-02(18.021s)
+  Iter  6: err=1.93e-02(19.050s)
+  Iter  7: err=1.13e-02(18.502s)
+  Iter  8: err=6.58e-03(18.245s)
+  Iter  9: err=3.76e-03(18.276s)
+  Convergence reached.
+Initializing Thermal Finite Elements (P1)...
+Mapping Velocity...
+Assembling Thermal System...
+Solving Thermal Linear System...
+  -> Solved. Range: [293.09, 389.35] K
+Case 187 completed successfully.
