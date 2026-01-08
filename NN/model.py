@@ -1,5 +1,58 @@
-import torch.nn as nn
+from torch import rand, nn,cfloat,fft,zeros,einsum,optim,compile
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from loader import MeshToGridDataset
+import torch
+torch.set_float32_matmul_precision('high')
+
+
+def collate_fn(batch):
+    """
+    Funzione statica per gestire batch di mesh con numero variabile di nodi.
+    Da usare nel DataLoader: collate_fn=MeshToGridDataset.collate_fn
+    """
+    # 1. Trova la dimensione massima N in questo batch
+    max_n = max([item['y_mesh'].shape[0] for item in batch])
+
+    x_grids = []
+    y_meshes = []
+    coords = []
+    masks = []
+
+    for item in batch:
+        # x_grid è fissa (C, H, W), basta aggiungerla alla lista
+        x_grids.append(item['x_grid'])
+
+        # Recuperiamo i dati variabili
+        y = item['y_mesh']  # (N, out_channels)
+        c = item['query_coords']  # (N, 2)
+        n = y.shape[0]
+
+        padding_len = max_n - n
+
+        # --- Creazione Mask ---
+        # 1 = Dato reale, 0 = Padding
+        mask = torch.cat([torch.ones(n), torch.zeros(padding_len)], dim=0)
+        masks.append(mask)
+
+        # --- Padding Dati ---
+        if padding_len > 0:
+            # Padding con zeri in fondo
+            y_pad = torch.cat([y, torch.zeros(padding_len, y.shape[1])], dim=0)
+            c_pad = torch.cat([c, torch.zeros(padding_len, c.shape[1])], dim=0)
+        else:
+            y_pad = y
+            c_pad = c
+
+        y_meshes.append(y_pad)
+        coords.append(c_pad)
+
+    return {
+        'x_grid': torch.stack(x_grids),  # (B, C, H, W)
+        'y_mesh': torch.stack(y_meshes),  # (B, Max_N, out_channels)
+        'query_coords': torch.stack(coords),  # (B, Max_N, 2)
+        'mask': torch.stack(masks)  # (B, Max_N) -> NUOVA CHIAVE
+    }
 
 class SpectralConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, modes1, modes2):
@@ -10,19 +63,19 @@ class SpectralConv2d(nn.Module):
         self.modes2 = modes2
 
         self.scale = (1 / (in_channels * out_channels))
-        self.weights1 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat))
-        self.weights2 = nn.Parameter(self.scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat))
+        self.weights1 = nn.Parameter(self.scale * rand(in_channels, out_channels, self.modes1, self.modes2, dtype=cfloat))
+        self.weights2 = nn.Parameter(self.scale * rand(in_channels, out_channels, self.modes1, self.modes2, dtype=cfloat))
 
     def compl_mul2d(self, input, weights):
-        return torch.einsum("bixy,ioxy->boxy", input, weights)
+        return einsum("bixy,ioxy->boxy", input, weights)
 
     def forward(self, x):
         batchsize = x.shape[0]
-        x_ft = torch.fft.rfft2(x)
-        out_ft = torch.zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=torch.cfloat, device=x.device)
+        x_ft = fft.rfft2(x)
+        out_ft = zeros(batchsize, self.out_channels, x.size(-2), x.size(-1)//2 + 1, dtype=cfloat, device=x.device)
         out_ft[:, :, :self.modes1, :self.modes2] = self.compl_mul2d(x_ft[:, :, :self.modes1, :self.modes2], self.weights1)
         out_ft[:, :, -self.modes1:, :self.modes2] = self.compl_mul2d(x_ft[:, :, -self.modes1:, :self.modes2], self.weights2)
-        x = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
+        x = fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)))
         return x
 
 class GeoFNO(nn.Module):
@@ -96,38 +149,45 @@ class GeoFNO(nn.Module):
 
 def train():
     # Setup
-    dataset = MeshToGridDataset(root_dir='./tuoi_dati', grid_size=(64, 64))
+    # Quando crei il dataset nel tuo file main o di training:
+    dataset = MeshToGridDataset(
+        root_dir='./../data_generation/dataset',
+        grid_size=(64, 64),
+        # Input: usa la chiave vista nella prima immagine
+        input_keys=['conductivity', "power"],
+        # Output: usa le chiavi che il messaggio di errore ti ha elencato
+        output_keys=['temperature', 'pressure', 'vx', 'vy']
+    )
     # Batch size 1 è spesso necessario se ogni mesh ha un numero diverso di nodi (N variabile).
     # Se tutte le mesh hanno lo stesso N, puoi usare batch_size > 1.
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True) 
-    
-    model = GeoFNO(modes1=12, modes2=12, width=32).cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.MSELoss()
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4, collate_fn=collate_fn)
 
-    print("Start Training GeoFNO...")
+    model = GeoFNO(modes1=12, modes2=12, width=32).cuda()
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+
+    print("Start Training (Standard Float32)...")
+
     for epoch in range(100):
         model.train()
         total_loss = 0
-        
+
         for batch in dataloader:
-            x_grid = batch['x_grid'].cuda()           # (B, 5, H, W)
-            y_mesh = batch['y_mesh'].cuda()           # (B, N, 4)
-            coords = batch['query_coords'].cuda()     # (B, N, 2)
-            
+            x_grid = batch['x_grid'].cuda(non_blocking=True)
+            y_mesh = batch['y_mesh'].cuda(non_blocking=True)
+            coords = batch['query_coords'].cuda(non_blocking=True)
+
             optimizer.zero_grad()
-            
-            # Forward: Input Grid -> FNO -> Sample at Coords -> Output Mesh Values
+
+            # Esecuzione standard (senza autocast)
             pred_mesh = model(x_grid, coords)
-            
-            # Loss calcolata direttamente sui nodi
-            loss = loss_fn(pred_mesh, y_mesh)
-            
-            loss.backward()
+            loss = F.mse_loss(pred_mesh, y_mesh)
+
+            loss.backward()  # Backward standard
             optimizer.step()
+
             total_loss += loss.item()
-            
-        print(f"Epoch {epoch}: Loss {total_loss/len(dataloader):.5f}")
+
+        print(f"Epoch {epoch}: Loss {total_loss / len(dataloader):.5f}")
 
 if __name__ == "__main__":
     train()
