@@ -7,6 +7,10 @@ import torch.nn.functional as F
 from loader import MeshToGridDataset
 from torch import cfloat, einsum, fft, nn, optim, rand
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import matplotlib.tri as tri
+import numpy as np
+import os
 
 torch.set_float32_matmul_precision("high")
 
@@ -193,56 +197,293 @@ class GeoFNO(nn.Module):
         return out
 
 
-def train():
+import torch
+import torch.nn.functional as F
+from torch import optim, nn
+from torch.utils.data import DataLoader, random_split
+import matplotlib.pyplot as plt
+import os
+import numpy as np
+
+
+# Assuming GeoFNO and MeshToGridDataset are imported or defined in the same file
+# from loader import MeshToGridDataset
+# from your_script import GeoFNO, collate_fn
+
+def compute_masked_loss(pred, target, mask):
     """
-    Training loop for GeoFNO.
+    Computes MSE Loss ignoring padding.
+    pred, target: (B, N, C)
+    mask: (B, N) -> 1 for real data, 0 for padding
     """
-    # Setup
-    dataset = MeshToGridDataset(
+    # Expand mask to cover channels (C)
+    # mask becomes (B, N, 1) for broadcasting over (B, N, C)
+    mask_expanded = mask.unsqueeze(-1)
+
+    # Compute element-wise squared error
+    squared_error = (pred - target) ** 2
+
+    # Zero out error in padding zones
+    masked_squared_error = squared_error * mask_expanded
+
+    # Sum of errors divided by number of valid elements (sum of mask * channels)
+    loss = masked_squared_error.sum() / (mask.sum() * target.shape[-1])
+    return loss
+
+
+def compute_relative_l2(pred, target, mask):
+    """
+    Computes Relative L2 Error (Standard metric for FNO).
+    Lower is better. Acts as an accuracy proxy.
+    """
+    mask_expanded = mask.unsqueeze(-1)
+
+    # Apply mask
+    pred = pred * mask_expanded
+    target = target * mask_expanded
+
+    # L2 Norm calculation over each sample in batch
+    # Sum over nodes (dim 1) and channels (dim 2), keep batch (dim 0)
+    diff_norms = torch.norm(pred - target, p=2, dim=(1, 2))
+    target_norms = torch.norm(target, p=2, dim=(1, 2))
+
+    # Avoid division by zero
+    rel_l2 = diff_norms / (target_norms + 1e-8)
+
+    return rel_l2.mean()  # Mean over batch
+
+
+def plot_history(train_losses, test_errors, save_dir):
+    """
+    Saves a plot of training loss and test error history.
+    """
+    plt.figure(figsize=(10, 5))
+
+    # Plot Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(train_losses, label='Train Loss (MSE)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss')
+    plt.legend()
+    plt.grid(True)
+
+    # Plot Accuracy (Rel L2)
+    plt.subplot(1, 2, 2)
+    plt.plot(test_errors, color='orange', label='Test Error (Rel L2)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Rel L2 Error')
+    plt.title('Test Error (Lower is better)')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "training_history.png"))
+    plt.close()
+
+
+# Aggiunto parametro domain_bounds
+def visualize_sample(coords, target, pred, mask, epoch, save_dir, len_x=20, len_y=5):
+    """
+    Genera plot in stile FEM, denormalizzando le coordinate per mostrare
+    l'aspect ratio fisico corretto.
+    """
+
+    # 2. Preparazione Dati (primo elemento del batch)
+    # c_norm sono le coordinate normalizzate nel range latente [-1, 1]
+    c_norm = coords[0].cpu().numpy()  # (N_max, 2)
+    t = target[0].cpu().numpy()  # (N_max, 4)
+    p = pred[0].cpu().numpy()  # (N_max, 4)
+    m = mask[0].cpu().numpy()  # (N_max)
+
+    # Filtra via il padding
+    valid_indices = m == 1
+    c_valid = c_norm[valid_indices]
+    t_vals = t[valid_indices]
+    p_vals = p[valid_indices]
+
+    # --- INIZIO DENORMALIZZAZIONE GEOMETRICA ---
+
+    # Passo A: Dal range latente [-1, 1] al range normalizzato [0, 1]
+    # Formula inversa di: query = norm * 2 - 1
+    c_01 = (c_valid + 1) / 2.0
+
+    # Passo B: Dal range [0, 1] alle Unità Fisiche
+    # Formula inversa di: norm_x = (phys_x - x_min) / len_x
+    phys_x = c_01[:, 0] * len_x
+    phys_y = c_01[:, 1] * len_y
+
+    # --- FINE DENORMALIZZAZIONE GEOMETRICA ---
+
+    # 3. Ricostruzione Mesh (Triangolazione sulle coordinate FISICHE)
+    # Ora la triangolazione avverrà sulla geometria "distesa" correttamente
+    triang = tri.Triangulation(phys_x, phys_y)
+
+    # 4. Estrazione Campi Fisici (come prima...)
+    T_gt = t_vals[:, 0]
+    vel_mag_gt = np.sqrt(t_vals[:, 2] ** 2 + t_vals[:, 3] ** 2)
+    T_pred = p_vals[:, 0]
+    vel_mag_pred = np.sqrt(p_vals[:, 2] ** 2 + p_vals[:, 3] ** 2)
+    T_err = np.abs(T_gt - T_pred)
+    vel_err = np.abs(vel_mag_gt - vel_mag_pred)
+
+    # ---------------- PLOTTING ----------------
+    fig, axs = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
+
+    # ... (Codice di tripcolor e colorbar identico a prima) ...
+    # Esempio:
+    cols = ['Ground Truth', 'Prediction', 'Absolute Error']
+    for ax, col in zip(axs[0], cols): ax.set_title(col, fontsize=16, pad=10)
+    im0 = axs[0, 0].tripcolor(triang, vel_mag_gt, shading='gouraud', cmap='turbo')
+    axs[0, 0].set_ylabel("Velocity Magnitude [m/s]", fontsize=14)
+    fig.colorbar(im0, ax=axs[0, 0], fraction=0.046, pad=0.04)
+    # ... ripeti per gli altri 5 plot ...
+    im1 = axs[0, 1].tripcolor(triang, vel_mag_pred, shading='gouraud', cmap='turbo')
+    fig.colorbar(im1, ax=axs[0, 1], fraction=0.046, pad=0.04)
+    im2 = axs[0, 2].tripcolor(triang, vel_err, shading='gouraud', cmap='inferno')
+    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046, pad=0.04)
+    im3 = axs[1, 0].tripcolor(triang, T_gt, shading='gouraud', cmap='inferno')
+    axs[1, 0].set_ylabel("Temperature [K]", fontsize=14)
+    fig.colorbar(im3, ax=axs[1, 0], fraction=0.046, pad=0.04)
+    im4 = axs[1, 1].tripcolor(triang, T_pred, shading='gouraud', cmap='inferno')
+    fig.colorbar(im4, ax=axs[1, 1], fraction=0.046, pad=0.04)
+    im5 = axs[1, 2].tripcolor(triang, T_err, shading='gouraud', cmap='inferno')
+    fig.colorbar(im5, ax=axs[1, 2], fraction=0.046, pad=0.04)
+
+    # Formattazione assi
+    for ax in axs.flat:
+        # FONDAMENTALE: 'equal' costringe matplotlib a rispettare le unità fisiche
+        # Se X va da 0 a 2.5 e Y da 0 a 0.5, il plot sarà rettangolare.
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+    filename = f"prediction_epoch_{epoch}.png"
+    plt.savefig(os.path.join(save_dir, filename), dpi=150)
+    plt.close(fig)
+
+def train_and_evaluate():
+    # ----------------CONFIGURATION----------------
+    BATCH_SIZE = 32
+    EPOCHS = 100
+    LR = 1e-3
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Create results directory
+    save_dir = "results"
+    os.makedirs(save_dir, exist_ok=True)
+    model_save_path = os.path.join(save_dir, "geofno_best_model.pth")
+
+    print(f"Using device: {device}")
+    print(f"Saving results to: {save_dir}/")
+
+    # ----------------DATASET----------------
+    # (Assuming dataset class is defined)
+    full_dataset = MeshToGridDataset(
         root_dir="./../data_generation/dataset",
         grid_size=(64, 64),
-        # Input keys from dataset
         input_keys=["conductivity", "power"],
-        # Output keys from dataset
         output_keys=["temperature", "pressure", "vx", "vy"],
     )
-    # batch_size > 1 is possible if meshes have different N due to collate_fn padding
-    dataloader = DataLoader(
-        dataset,
-        batch_size=32,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        collate_fn=collate_fn,
+
+    # Split Train (80%) / Test (20%)
+    train_size = int(0.8 * len(full_dataset))
+    test_size = len(full_dataset) - train_size
+    train_dataset, test_dataset = random_split(full_dataset, [train_size, test_size])
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=BATCH_SIZE, shuffle=True,
+        num_workers=4, pin_memory=True, collate_fn=collate_fn
     )
 
-    model = GeoFNO(modes1=12, modes2=12, width=32).cuda()
+    test_loader = DataLoader(
+        test_dataset, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=4, pin_memory=True, collate_fn=collate_fn
+    )
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    # ----------------MODEL----------------
+    model = GeoFNO(modes1=12, modes2=12, width=32).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=LR)
 
-    print("Start Training (Standard Float32)...")
+    # Scheduler to reduce LR on plateau
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
 
-    for epoch in range(100):
+    # History Logging
+    train_loss_history = []
+    test_error_history = []
+    best_test_error = float('inf')
+
+    print("Start Training...")
+    print(f"{'Epoch':<5} | {'Train Loss':<12} | {'Test L2 Error':<15} | {'Status':<10}")
+    print("-" * 50)
+
+    for epoch in range(EPOCHS):
+        # --- TRAINING ---
         model.train()
-        total_loss = 0
+        train_loss_accum = 0
 
-        for batch in dataloader:
-            x_grid = batch["x_grid"].cuda(non_blocking=True)
-            y_mesh = batch["y_mesh"].cuda(non_blocking=True)
-            coords = batch["query_coords"].cuda(non_blocking=True)
+        for batch in train_loader:
+            x_grid = batch["x_grid"].to(device, non_blocking=True)
+            y_mesh = batch["y_mesh"].to(device, non_blocking=True)
+            coords = batch["query_coords"].to(device, non_blocking=True)
+            mask = batch["mask"].to(device, non_blocking=True)
 
             optimizer.zero_grad()
-
             pred_mesh = model(x_grid, coords)
-            loss = F.mse_loss(pred_mesh, y_mesh)
+
+            # Masked Loss
+            loss = compute_masked_loss(pred_mesh, y_mesh, mask)
 
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            train_loss_accum += loss.item()
 
-        print(f"Epoch {epoch}: Loss {total_loss / len(dataloader):.5f}")
+        avg_train_loss = train_loss_accum / len(train_loader)
+        train_loss_history.append(avg_train_loss)
+
+        # --- VALIDATION / TEST ---
+        model.eval()
+        test_l2_accum = 0
+
+        with torch.no_grad():
+            for i, batch in enumerate(test_loader):
+                x_grid = batch["x_grid"].to(device, non_blocking=True)
+                y_mesh = batch["y_mesh"].to(device, non_blocking=True)
+                coords = batch["query_coords"].to(device, non_blocking=True)
+                mask = batch["mask"].to(device, non_blocking=True)
+
+                pred_mesh = model(x_grid, coords)
+
+                # Relative L2 Error
+                l2_err = compute_relative_l2(pred_mesh, y_mesh, mask)
+                test_l2_accum += l2_err.item()
+
+                # Visualize first batch of test set every 10 epochs
+                if i == 0 and (epoch % 10 == 0 or epoch == EPOCHS - 1):
+                    visualize_sample(coords, y_mesh, pred_mesh, mask, epoch, save_dir)
+
+        avg_test_l2 = test_l2_accum / len(test_loader)
+        test_error_history.append(avg_test_l2)
+
+        # Step Scheduler
+        scheduler.step(avg_test_l2)
+
+        # --- LOGGING & SAVING ---
+        status = ""
+        if avg_test_l2 < best_test_error:
+            best_test_error = avg_test_l2
+            torch.save(model.state_dict(), model_save_path)
+            status = "SAVED"
+
+        print(f"{epoch + 1:<5} | {avg_train_loss:.6f}     | {avg_test_l2:.6f}        | {status}")
+
+    # --- FINAL PLOTS ---
+    plot_history(train_loss_history, test_error_history, save_dir)
+
+    print("-" * 50)
+    print(f"Training Complete. Best Test L2 Error: {best_test_error:.6f}")
+    print(f"Model and plots saved in: {save_dir}")
 
 
 if __name__ == "__main__":
-    train()
+    train_and_evaluate()
