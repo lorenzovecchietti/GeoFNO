@@ -15,13 +15,13 @@ from utils import (
     augment_batch,
     collate_fn,
     compute_masked_loss,
-    visualize_sample,
+    visualize_sample, plot_history,
 )
 
 BATCH_SIZE = 16
-EPOCHS = 1000
+EPOCHS = 500
 LR = 1e-3
-PATIENCE = 15
+PATIENCE = 20
 NUM_EXAMPLES = 10
 
 
@@ -66,8 +66,8 @@ def train_and_evaluate():
     )
 
     model = GeoFNO(
-        modes1=32,
-        modes2=32,
+        modes1=64,
+        modes2=64,
         width=128,
         dropout_rate=0.1
     ).to(device)
@@ -128,9 +128,6 @@ def train_and_evaluate():
                 out = model(x_grid, coords)
                 test_err += compute_masked_loss(out, y_mesh, mask).item()
 
-                if i == 0 and epoch % 10 == 0:
-                    visualize_sample(x_grid, coords, y_mesh, out, mask, epoch, save_dir)
-
         avg_test = test_err / len(test_loader)
         test_hist.append(avg_test)
 
@@ -147,8 +144,6 @@ def train_and_evaluate():
         if avg_test < best_test_error:
             best_test_error = avg_test
             patience_counter = 0
-            torch.save(model.state_dict(), os.path.join(save_dir, "best_model.pth"))
-            print("  -> Model Saved (New Best)")
         else:
             patience_counter += 1
             print(f"  -> No improvement. Patience: {patience_counter}/{PATIENCE}")
@@ -174,7 +169,7 @@ def train_and_evaluate():
     count = 0
     test_vis_dir = os.path.join(save_dir, "test_examples")
     os.makedirs(test_vis_dir, exist_ok=True)
-
+    plot_history(train_hist, test_hist, save_dir)
     with torch.no_grad():
         for _, batch in enumerate(test_loader):
             if count >= NUM_EXAMPLES:
