@@ -65,7 +65,6 @@ def train_and_evaluate():
         pin_memory=True,
     )
 
-<<<<<<< HEAD
     model = GeoFNO(
         modes1=32,
         modes2=32,
@@ -73,10 +72,6 @@ def train_and_evaluate():
         dropout_rate=0.1
     ).to(device)
     
-=======
-    model = GeoFNO(modes1=16, modes2=16, width=128, dropout_rate=0.1).to(device)
-
->>>>>>> 582f17a (Improve style)
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
