@@ -1,1 +1,4 @@
 *__pycache__*
+*.idea*
+*grid_hybrid*
+*stats.pt*

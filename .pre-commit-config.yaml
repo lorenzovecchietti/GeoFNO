@@ -29,7 +29,5 @@ repos:
         types: [python]
         require_serial: true
         args: [
-          "-rn", # Solo messaggi, niente report punteggio
-          "-sn", # Niente score finale
           "--rcfile=pyproject.toml" # Usa la tua config esistente
         ]
