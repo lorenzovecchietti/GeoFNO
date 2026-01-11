@@ -64,8 +64,8 @@ def train_and_evaluate():
     )
 
     model = GeoFNO(
-        modes1=16,
-        modes2=16, 
+        modes1=32,
+        modes2=32,
         width=128,
         dropout_rate=0.1
     ).to(device)
