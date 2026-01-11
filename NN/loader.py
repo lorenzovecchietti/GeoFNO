@@ -21,6 +21,7 @@ os.environ["MESHIO_LOG_LEVEL"] = "ERROR"
 warnings.filterwarnings("ignore")
 
 
+# pylint: disable=too-many-instance-attributes, too-many-arguments, too-many-positional-arguments
 class MeshToGridDataset(Dataset):
     """
     Dataset class that converts mesh data to grid data with hybrid interpolation.
@@ -32,8 +33,8 @@ class MeshToGridDataset(Dataset):
         root_dir: str,
         grid_size: tuple = (128, 128),
         normalize: bool = True,
-        input_keys: list = None,
-        output_keys: list = None,
+        input_keys: list | None = None,
+        output_keys: list | None = None,
         force_recompute: bool = False,
     ):
         """
@@ -77,15 +78,15 @@ class MeshToGridDataset(Dataset):
             self._compute_or_load_stats()
 
         # Data cache for fast memory access
-        self.data_cache = []
+        self.data_cache: list[dict[str, np.ndarray]] = []
         self._pre_load_data()
 
+    # pylint: disable=too-many-locals, too-many-statements
     def _pre_load_data(self):
         """Pre-loads all dataset cases into RAM to speed up training."""
-        
+
         print(f"Pre-loading {len(self.cases)} cases into RAM...")
-        for idx in range(len(self.cases)):
-            case_name = self.cases[idx]
+        for _, case_name in enumerate(self.cases):
             case_path = os.path.join(self.root_dir, case_name)
             grid_cache_path = os.path.join(
                 case_path, f"grid_hybrid_{self.grid_size[0]}x{self.grid_size[1]}.npy"
@@ -98,7 +99,7 @@ class MeshToGridDataset(Dataset):
                 ), contextlib.redirect_stderr(io.StringIO()):
                     mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
                     points = mesh.points[:, :2].astype(np.float32)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
                 points = mesh.points[:, :2].astype(np.float32)
 
@@ -117,26 +118,28 @@ class MeshToGridDataset(Dataset):
             if os.path.exists(grid_cache_path) and not self.force_recompute:
                 input_grid = np.load(grid_cache_path)
             else:
-                # Load RAW input nodes (needed for checking conductivity before normalization)
+                # Load RAW input nodes
                 input_nodes_raw = self._extract_data_from_dict(
                     os.path.join(case_path, "inputs.npy"), self.input_keys
                 ).astype(np.float32)
 
                 # Automatic fluid/solid mask detection based on conductivity
                 try:
-                    k_idx = self.input_keys.index("k") 
+                    k_idx = self.input_keys.index("k")
                 except ValueError:
-                    k_idx = 0 
-                
+                    k_idx = 0
+
                 k_values = input_nodes_raw[:, k_idx]
-                
-                # Detect fluid as the most frequent conductivity value (background material)
+
+                # Detect fluid as the most frequent conductivity value
                 vals, counts = np.unique(np.round(k_values, 5), return_counts=True)
                 k_fluid_detected = vals[np.argmax(counts)]
-                
+
                 # Create solid mask: 1.0 for solid, 0.0 for fluid
                 epsilon = 1e-2
-                node_mask_solid = (np.abs(k_values - k_fluid_detected) > epsilon).astype(np.float32)
+                node_mask_solid = (
+                    np.abs(k_values - k_fluid_detected) > epsilon
+                ).astype(np.float32)
 
                 # Apply normalization to inputs if requested
                 if self.normalize:
@@ -167,20 +170,20 @@ class MeshToGridDataset(Dataset):
                         grid_c_linear[mask_nan] = grid_c_nearest[mask_nan]
                     grid_channels.append(grid_c_linear)
 
-                # Interpolate solid/fluid mask using nearest-neighbor to preserve sharp boundaries
+                # Nearest-neighbor for sharp boundaries
                 grid_mask = griddata(
                     norm_points,
                     node_mask_solid,
                     (self.grid_x, self.grid_y),
-                    method="nearest", 
+                    method="nearest",
                     fill_value=0,
                 )
-                
+
                 # Append coordinates and mask as additional input channels
                 grid_channels.append(self.grid_x.astype(np.float32))
                 grid_channels.append(self.grid_y.astype(np.float32))
                 grid_channels.append(grid_mask.astype(np.float32))
-                
+
                 input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
                 np.save(grid_cache_path, input_grid)
 
@@ -275,4 +278,3 @@ class MeshToGridDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data_cache[idx]
-
