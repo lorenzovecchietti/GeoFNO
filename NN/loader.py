@@ -7,6 +7,7 @@ import contextlib
 import io
 import logging
 import os
+import pickle
 import warnings
 
 import meshio
@@ -103,6 +104,12 @@ class MeshToGridDataset(Dataset):
                 mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
                 points = mesh.points[:, :2].astype(np.float32)
 
+            # 1b. Load vel_inlet from params.pkl
+            params_path = os.path.join(case_path, "params.pkl")
+            with open(params_path, "rb") as f:
+                params = pickle.load(f)
+            vel_inlet = params["vel_inlet"]
+
             # 2. Extract solution data on mesh nodes
             output_nodes = self._extract_data_from_dict(
                 os.path.join(case_path, "solutions.npy"), self.output_keys
@@ -183,6 +190,13 @@ class MeshToGridDataset(Dataset):
                 grid_channels.append(self.grid_x.astype(np.float32))
                 grid_channels.append(self.grid_y.astype(np.float32))
                 grid_channels.append(grid_mask.astype(np.float32))
+
+                # Append vel_inlet as 2D vector (vx_inlet, vy_inlet)
+                # Base orientation: flow in +x direction
+                vel_inlet_x = np.full_like(self.grid_x, vel_inlet, dtype=np.float32)
+                vel_inlet_y = np.zeros_like(self.grid_y, dtype=np.float32)
+                grid_channels.append(vel_inlet_x)
+                grid_channels.append(vel_inlet_y)
 
                 input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
                 np.save(grid_cache_path, input_grid)

@@ -19,10 +19,14 @@ from utils import (
 )
 
 BATCH_SIZE = 16
-EPOCHS = 500
+EPOCHS = 100
 LR = 1e-3
 PATIENCE = 20
 NUM_EXAMPLES = 10
+
+# Loss weights for multi-task learning
+W_TEMP = 1.0  # Weight for temperature loss (L2 relative)
+W_VEL = 5.0   # Weight for velocity loss (L1)
 
 
 # pylint: disable=too-many-locals, too-many-statements, too-many-branches
@@ -41,7 +45,8 @@ def train_and_evaluate():
         root_dir="./../data_generation/dataset",
         grid_size=(128, 128),
         input_keys=["conductivity", "power"],
-        output_keys=["temperature", "pressure", "vx", "vy"],
+        output_keys=["temperature", "vx", "vy"],
+        force_recompute=True,  # Recompute to include vel_inlet channels
     )
 
     train_size = int(0.8 * len(full_dataset))
@@ -66,8 +71,8 @@ def train_and_evaluate():
     )
 
     model = GeoFNO(
-        modes1=64,
-        modes2=64,
+        modes1=32,
+        modes2=32,
         width=128,
         dropout_rate=0.1
     ).to(device)
@@ -102,7 +107,7 @@ def train_and_evaluate():
 
             optimizer.zero_grad()
             out = model(x_grid, coords)
-            loss = compute_masked_loss(out, y_mesh, mask)
+            loss = compute_masked_loss(out, y_mesh, mask, w_temp=W_TEMP, w_vel=W_VEL)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -126,7 +131,7 @@ def train_and_evaluate():
                 mask = batch["mask"].to(device)
 
                 out = model(x_grid, coords)
-                test_err += compute_masked_loss(out, y_mesh, mask).item()
+                test_err += compute_masked_loss(out, y_mesh, mask, w_temp=W_TEMP, w_vel=W_VEL).item()
 
         avg_test = test_err / len(test_loader)
         test_hist.append(avg_test)

@@ -45,20 +45,43 @@ def collate_fn(batch):
     }
 
 
-def compute_masked_loss(pred, target, mask):
+def compute_masked_loss(pred, target, mask, w_temp=1.0, w_vel=1.0):
     """
-    Computes relative L2 loss (standard for FNO).
-    Loss = ||Pred - Target||_2 / ||Target||_2
+    Computes weighted multi-task loss for temperature and velocity.
+
+    Args:
+        pred: Predictions (B, N, 3) - [T, vx, vy]
+        target: Ground truth (B, N, 3) - [T, vx, vy]
+        mask: Valid node mask (B, N)
+        w_temp: Weight for temperature loss (L2 relative)
+        w_vel: Weight for velocity loss (L1)
+
+    Returns:
+        Weighted combined loss
     """
     mask_expanded = mask.unsqueeze(-1)
     pred = pred * mask_expanded
     target = target * mask_expanded
 
-    diff_norms = torch.norm(pred - target, p=2, dim=(1, 2))
-    target_norms = torch.norm(target, p=2, dim=(1, 2))
-    loss = (diff_norms / (target_norms + 1e-8)).mean()
+    # Temperature: Relative L2 loss
+    pred_T = pred[..., 0:1]
+    target_T = target[..., 0:1]
+    diff_T = torch.norm(pred_T - target_T, p=2, dim=(1, 2))
+    norm_T = torch.norm(target_T, p=2, dim=(1, 2))
+    loss_T = (diff_T / (norm_T + 1e-8)).mean()
+
+    # Velocity: L1 loss (robust to localized peaks)
+    pred_V = pred[..., 1:3]
+    target_V = target[..., 1:3]
+    # Normalize by number of valid nodes
+    n_valid = mask.sum(dim=1, keepdim=True).clamp(min=1)
+    loss_V = (torch.abs(pred_V - target_V).sum(dim=(1, 2)) / n_valid.squeeze()).mean()
+
+    # Combined weighted loss
+    loss = w_temp * loss_T + w_vel * loss_V
 
     return loss
+
 
 
 # pylint: disable=too-many-arguments, too-many-positional-arguments
@@ -107,11 +130,11 @@ def visualize_sample(
     # 3. Mesh Reconstruction
     triang = tri.Triangulation(phys_x, phys_y)
 
-    # 4. Physical Field Extraction
+    # 4. Physical Field Extraction (output format: T, vx, vy)
     t_gt = t_vals[:, 0]
-    vel_mag_gt = np.sqrt(t_vals[:, 2] ** 2 + t_vals[:, 3] ** 2)
+    vel_mag_gt = np.sqrt(t_vals[:, 1] ** 2 + t_vals[:, 2] ** 2)
     t_pred = p_vals[:, 0]
-    vel_mag_pred = np.sqrt(p_vals[:, 2] ** 2 + p_vals[:, 3] ** 2)
+    vel_mag_pred = np.sqrt(p_vals[:, 1] ** 2 + p_vals[:, 2] ** 2)
     t_err = np.abs(t_gt - t_pred)
     vel_err = np.abs(vel_mag_gt - vel_mag_pred)
 
@@ -243,18 +266,25 @@ def plot_history(train_losses, test_errors, save_dir):
 def augment_batch(x_grid, y_mesh, coords):
     """
     Applies random flips and rotations (0, 90, 180, 270 degrees) for data augmentation.
+
+    x_grid channels: [conductivity, power, x, y, mask, vel_inlet_x, vel_inlet_y]
+    y_mesh channels: [T, vx, vy]
     """
     # Random horizontal flip
     if torch.rand(1) < 0.5:
+        x_grid = x_grid.clone()
         x_grid = x_grid.flip(2)
         coords = coords.clone()
         coords[..., 1] = -coords[..., 1]
         y_mesh = y_mesh.clone()
-        y_mesh[..., 3] = -y_mesh[..., 3]  # Flip vy component
+        y_mesh[..., 2] = -y_mesh[..., 2]  # Flip vy component (index 2)
+        # Flip vel_inlet_y component (channel 6)
+        x_grid[:, 6, ...] = -x_grid[:, 6, ...]
 
     # Random rotation in 90-degree increments
     k = torch.randint(0, 4, (1,)).item()
     if k > 0:
+        x_grid = x_grid.clone()
         x_grid = torch.rot90(x_grid, k, [2, 3])
 
         # Apply rotation matrix to coordinates
@@ -267,10 +297,18 @@ def augment_batch(x_grid, y_mesh, coords):
 
         coords = torch.matmul(coords, rot_matrix.T)
 
-        # Rotate velocity vectors (vx, vy at indices 2, 3)
-        vel = y_mesh[..., 2:4]
-        vel_rot = torch.matmul(vel, rot_matrix.T)
+        # Rotate velocity vectors in output (vx, vy at indices 1, 2)
         y_mesh = y_mesh.clone()
-        y_mesh[..., 2:4] = vel_rot
+        vel = y_mesh[..., 1:3]
+        vel_rot = torch.matmul(vel, rot_matrix.T)
+        y_mesh[..., 1:3] = vel_rot
+
+        # Rotate vel_inlet vector in input (channels 5, 6)
+        # x_grid shape: (B, C, H, W) -> need to apply rotation per-pixel
+        vel_inlet = torch.stack([x_grid[:, 5, ...], x_grid[:, 6, ...]], dim=-1)
+        vel_inlet_rot = torch.matmul(vel_inlet, rot_matrix.T.to(x_grid.device))
+        x_grid[:, 5, ...] = vel_inlet_rot[..., 0]
+        x_grid[:, 6, ...] = vel_inlet_rot[..., 1]
 
     return x_grid, y_mesh, coords
+
