@@ -1,6 +1,6 @@
 """
 Module for loading mesh data and interpolating it onto a regular grid for FNO.
-Revised to avoid library noise and optimize training speed.
+Revised to avoid library noise and optimize training speed using Multiprocessing.
 """
 
 import contextlib
@@ -9,12 +9,15 @@ import logging
 import os
 import pickle
 import warnings
+import functools
+from concurrent.futures import ProcessPoolExecutor
 
 import meshio
 import numpy as np
 import torch
 from scipy.interpolate import griddata
 from torch.utils.data import Dataset
+from tqdm import tqdm  # Recommended for progress tracking
 
 # Absolute silence for libraries that talk too much
 logging.getLogger("meshio").setLevel(logging.ERROR)
@@ -26,7 +29,7 @@ warnings.filterwarnings("ignore")
 class MeshToGridDataset(Dataset):
     """
     Dataset class that converts mesh data to grid data with hybrid interpolation.
-    Pre-loads everything to RAM to ensure silent and fast training.
+    Pre-loads everything to RAM using Multiprocessing.
     """
 
     def __init__(
@@ -37,6 +40,7 @@ class MeshToGridDataset(Dataset):
         input_keys: list | None = None,
         output_keys: list | None = None,
         force_recompute: bool = False,
+        num_workers: int = 16,  # New argument for parallelism
     ):
         """
         Initializes the dataset.
@@ -48,6 +52,7 @@ class MeshToGridDataset(Dataset):
             input_keys: List of keys to extract from input files.
             output_keys: List of keys to extract from solution files.
             force_recompute: If True, recomputes grid interpolation even if cached.
+            num_workers: Number of CPU processes to use for loading.
         """
         self.root_dir = root_dir
         self.grid_size = grid_size
@@ -55,6 +60,7 @@ class MeshToGridDataset(Dataset):
         self.input_keys = input_keys if input_keys is not None else ["conductivity"]
         self.output_keys = output_keys if output_keys is not None else ["solution"]
         self.force_recompute = force_recompute
+        self.num_workers = num_workers
 
         self.cases = sorted(
             [
@@ -64,7 +70,7 @@ class MeshToGridDataset(Dataset):
             ]
         )
 
-        # Fixed grid in [0, 1] range
+        # Fixed grid in [0, 1] range (Used for reference, passed to workers)
         xi = np.linspace(0, 1, grid_size[1])
         yi = np.linspace(0, 1, grid_size[0])
         self.grid_x, self.grid_y = np.meshgrid(xi, yi)
@@ -82,145 +88,9 @@ class MeshToGridDataset(Dataset):
         self.data_cache: list[dict[str, np.ndarray]] = []
         self._pre_load_data()
 
-    # pylint: disable=too-many-locals, too-many-statements
-    def _pre_load_data(self):
-        """Pre-loads all dataset cases into RAM to speed up training."""
-
-        print(f"Pre-loading {len(self.cases)} cases into RAM...")
-        for _, case_name in enumerate(self.cases):
-            case_path = os.path.join(self.root_dir, case_name)
-            grid_cache_path = os.path.join(
-                case_path, f"grid_hybrid_{self.grid_size[0]}x{self.grid_size[1]}.npy"
-            )
-
-            # 1. Load mesh points for ground truth coordinates
-            try:
-                with contextlib.redirect_stdout(
-                    io.StringIO()
-                ), contextlib.redirect_stderr(io.StringIO()):
-                    mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
-                    points = mesh.points[:, :2].astype(np.float32)
-            except Exception:  # pylint: disable=broad-exception-caught
-                mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
-                points = mesh.points[:, :2].astype(np.float32)
-
-            # 1b. Load vel_inlet from params.pkl
-            params_path = os.path.join(case_path, "params.pkl")
-            with open(params_path, "rb") as f:
-                params = pickle.load(f)
-            vel_inlet = params["vel_inlet"]
-
-            # 2. Extract solution data on mesh nodes
-            output_nodes = self._extract_data_from_dict(
-                os.path.join(case_path, "solutions.npy"), self.output_keys
-            ).astype(np.float32)
-
-            # Normalize coordinates to range [-1, 1] for grid_sample
-            min_pos = points.min(axis=0)
-            max_pos = points.max(axis=0)
-            norm_points = (points - min_pos) / (max_pos - min_pos + 1e-8)
-            query_coords = norm_points * 2 - 1
-
-            # 3. Process Input Grid
-            if os.path.exists(grid_cache_path) and not self.force_recompute:
-                input_grid = np.load(grid_cache_path)
-            else:
-                # Load RAW input nodes
-                input_nodes_raw = self._extract_data_from_dict(
-                    os.path.join(case_path, "inputs.npy"), self.input_keys
-                ).astype(np.float32)
-
-                # Automatic fluid/solid mask detection based on conductivity
-                try:
-                    k_idx = self.input_keys.index("k")
-                except ValueError:
-                    k_idx = 0
-
-                k_values = input_nodes_raw[:, k_idx]
-
-                # Detect fluid as the most frequent conductivity value
-                vals, counts = np.unique(np.round(k_values, 5), return_counts=True)
-                k_fluid_detected = vals[np.argmax(counts)]
-
-                # Create solid mask: 1.0 for solid, 0.0 for fluid
-                epsilon = 1e-2
-                node_mask_solid = (
-                    np.abs(k_values - k_fluid_detected) > epsilon
-                ).astype(np.float32)
-
-                # Apply normalization to inputs if requested
-                if self.normalize:
-                    input_nodes = (
-                        input_nodes_raw - self.input_mean.numpy()
-                    ) / self.input_std.numpy()
-                else:
-                    input_nodes = input_nodes_raw
-
-                grid_channels = []
-                for i in range(input_nodes.shape[1]):
-                    # Hybrid interpolation: linear with nearest-neighbor fallback
-                    grid_c_linear = griddata(
-                        norm_points,
-                        input_nodes[:, i],
-                        (self.grid_x, self.grid_y),
-                        method="linear",
-                        fill_value=np.nan,
-                    )
-                    mask_nan = np.isnan(grid_c_linear)
-                    if np.any(mask_nan):
-                        grid_c_nearest = griddata(
-                            norm_points,
-                            input_nodes[:, i],
-                            (self.grid_x, self.grid_y),
-                            method="nearest",
-                        )
-                        grid_c_linear[mask_nan] = grid_c_nearest[mask_nan]
-                    grid_channels.append(grid_c_linear)
-
-                # Nearest-neighbor for sharp boundaries
-                grid_mask = griddata(
-                    norm_points,
-                    node_mask_solid,
-                    (self.grid_x, self.grid_y),
-                    method="nearest",
-                    fill_value=0,
-                )
-
-                # Append coordinates and mask as additional input channels
-                grid_channels.append(self.grid_x.astype(np.float32))
-                grid_channels.append(self.grid_y.astype(np.float32))
-                grid_channels.append(grid_mask.astype(np.float32))
-
-                # Append vel_inlet as 2D vector (vx_inlet, vy_inlet)
-                # Base orientation: flow in +x direction
-                vel_inlet_x = np.full_like(self.grid_x, vel_inlet, dtype=np.float32)
-                vel_inlet_y = np.zeros_like(self.grid_y, dtype=np.float32)
-                grid_channels.append(vel_inlet_x)
-                grid_channels.append(vel_inlet_y)
-
-                input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
-                np.save(grid_cache_path, input_grid)
-
-            # 4. Final normalization and tensor conversion
-            if self.normalize:
-                output_nodes_t = (
-                    torch.tensor(output_nodes) - self.output_mean
-                ) / self.output_std
-            else:
-                output_nodes_t = torch.tensor(output_nodes)
-
-            self.data_cache.append(
-                {
-                    "x_grid": torch.from_numpy(input_grid).float(),
-                    "y_mesh": output_nodes_t.float(),
-                    "query_coords": torch.from_numpy(query_coords).float(),
-                    "mask": torch.ones(output_nodes_t.shape[0]),
-                }
-            )
-        print("Data pre-loaded successfully.")
-
-    def _extract_data_from_dict(self, file_path: str, keys: list):
-        """Loads a .npy file and extracts requested keys as a NumPy array."""
+    @staticmethod
+    def _extract_data_from_dict_static(file_path: str, keys: list):
+        """Static helper to extract data (must be static for pickling)."""
         data_obj = np.load(file_path, allow_pickle=True)
         if data_obj.ndim == 0:
             data_dict = data_obj.item()
@@ -244,6 +114,207 @@ class MeshToGridDataset(Dataset):
                 raise KeyError(f"Key '{key}' not found in {file_path}")
         return np.concatenate(extracted_arrays, axis=1)
 
+    @staticmethod
+    def _process_single_case(
+        case_name,
+        root_dir,
+        grid_size,
+        input_keys,
+        output_keys,
+        grid_x,
+        grid_y,
+        force_recompute,
+        stats_dict,  # Pass stats as a dict/tuple, avoiding full self reference
+        normalize,
+    ):
+        """
+        Worker function to process a single case.
+        Must be static and self-contained for multiprocessing.
+        """
+        # Re-silence inside worker process
+        logging.getLogger("meshio").setLevel(logging.ERROR)
+
+        case_path = os.path.join(root_dir, case_name)
+        grid_cache_path = os.path.join(
+            case_path, f"grid_hybrid_{grid_size[0]}x{grid_size[1]}.npy"
+        )
+
+        # 1. Load mesh points
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
+                points = mesh.points[:, :2].astype(np.float32)
+        except Exception:
+            mesh = meshio.read(os.path.join(case_path, "mesh.msh"))
+            points = mesh.points[:, :2].astype(np.float32)
+
+        # 1b. Load vel_inlet
+        params_path = os.path.join(case_path, "params.pkl")
+        with open(params_path, "rb") as f:
+            params = pickle.load(f)
+        vel_inlet = params["vel_inlet"]
+
+        # 2. Extract solution data
+        output_nodes = MeshToGridDataset._extract_data_from_dict_static(
+            os.path.join(case_path, "solutions.npy"), output_keys
+        ).astype(np.float32)
+
+        # Normalize coordinates [-1, 1]
+        min_pos = points.min(axis=0)
+        max_pos = points.max(axis=0)
+        norm_points = (points - min_pos) / (max_pos - min_pos + 1e-8)
+        query_coords = norm_points * 2 - 1
+
+        # 3. Process Input Grid
+        if os.path.exists(grid_cache_path) and not force_recompute:
+            input_grid = np.load(grid_cache_path)
+        else:
+            input_nodes_raw = MeshToGridDataset._extract_data_from_dict_static(
+                os.path.join(case_path, "inputs.npy"), input_keys
+            ).astype(np.float32)
+
+            # Auto-mask detection
+            try:
+                k_idx = input_keys.index("k")
+            except ValueError:
+                k_idx = 0
+
+            k_values = input_nodes_raw[:, k_idx]
+            vals, counts = np.unique(np.round(k_values, 5), return_counts=True)
+            k_fluid_detected = vals[np.argmax(counts)]
+            node_mask_solid = (
+                np.abs(k_values - k_fluid_detected) > 1e-2
+            ).astype(np.float32)
+
+            # Apply Stats if normalized
+            if normalize and stats_dict is not None:
+                # Convert torch stats to numpy for the worker
+                in_mean = stats_dict["input_mean"].numpy()
+                in_std = stats_dict["input_std"].numpy()
+                input_nodes = (input_nodes_raw - in_mean) / in_std
+            else:
+                input_nodes = input_nodes_raw
+
+            grid_channels = []
+            for i in range(input_nodes.shape[1]):
+                # Linear Interp
+                grid_c_linear = griddata(
+                    norm_points,
+                    input_nodes[:, i],
+                    (grid_x, grid_y),
+                    method="linear",
+                    fill_value=np.nan,
+                )
+                # Nearest fallback
+                mask_nan = np.isnan(grid_c_linear)
+                if np.any(mask_nan):
+                    grid_c_nearest = griddata(
+                        norm_points,
+                        input_nodes[:, i],
+                        (grid_x, grid_y),
+                        method="nearest",
+                    )
+                    grid_c_linear[mask_nan] = grid_c_nearest[mask_nan]
+                grid_channels.append(grid_c_linear)
+
+            # Mask Interp (Nearest)
+            grid_mask = griddata(
+                norm_points,
+                node_mask_solid,
+                (grid_x, grid_y),
+                method="nearest",
+                fill_value=0,
+            )
+
+            # Coordinate channels
+            grid_channels.append(grid_x.astype(np.float32))
+            grid_channels.append(grid_y.astype(np.float32))
+            grid_channels.append(grid_mask.astype(np.float32))
+
+            # Vel Inlet channels
+            vel_inlet_x = np.full_like(grid_x, vel_inlet, dtype=np.float32)
+            vel_inlet_y = np.zeros_like(grid_y, dtype=np.float32)
+            grid_channels.append(vel_inlet_x)
+            grid_channels.append(vel_inlet_y)
+
+            input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
+            np.save(grid_cache_path, input_grid)
+
+        # 4. Final output normalization
+        if normalize and stats_dict is not None:
+            out_mean = stats_dict["output_mean"]
+            out_std = stats_dict["output_std"]
+            # Keep as numpy here, convert to tensor in main process to be safe/clean
+            output_nodes_norm = (output_nodes - out_mean.numpy()) / out_std.numpy()
+        else:
+            output_nodes_norm = output_nodes
+
+        # Return dict of numpy arrays (lighter to move across processes than tensors)
+        return {
+            "x_grid": input_grid,
+            "y_mesh": output_nodes_norm,
+            "query_coords": query_coords,
+            "mask": np.ones(output_nodes_norm.shape[0]),
+        }
+
+    def _pre_load_data(self):
+        """Pre-loads all dataset cases into RAM using Multiprocessing."""
+        print(f"Pre-loading {len(self.cases)} cases with {self.num_workers} workers...")
+
+        # Prepare stats dictionary to pass to workers
+        stats_dict = None
+        if self.normalize:
+            stats_dict = {
+                "input_mean": self.input_mean,
+                "input_std": self.input_std,
+                "output_mean": self.output_mean,
+                "output_std": self.output_std,
+            }
+
+        # Partially apply arguments that are constant across all cases
+        worker_func = functools.partial(
+            self._process_single_case,
+            root_dir=self.root_dir,
+            grid_size=self.grid_size,
+            input_keys=self.input_keys,
+            output_keys=self.output_keys,
+            grid_x=self.grid_x,
+            grid_y=self.grid_y,
+            force_recompute=self.force_recompute,
+            stats_dict=stats_dict,
+            normalize=self.normalize
+        )
+
+        # Use ProcessPoolExecutor to run in parallel
+        results = []
+        with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
+            # Map preserves order
+            results_iter = list(tqdm(
+                executor.map(worker_func, self.cases),
+                total=len(self.cases),
+                desc="Loading Data"
+            ))
+
+        # Convert back to Tensor in the main process
+        # This avoids sharing Torch tensors across process boundaries which can be buggy
+        print("Finalizing tensors...")
+        for res in results_iter:
+            self.data_cache.append({
+                "x_grid": torch.from_numpy(res["x_grid"]).float(),
+                "y_mesh": torch.from_numpy(res["y_mesh"]).float(),
+                "query_coords": torch.from_numpy(res["query_coords"]).float(),
+                "mask": torch.from_numpy(res["mask"]).float(),
+            })
+
+        print("Data pre-loaded successfully.")
+
+    def _extract_data_from_dict(self, file_path: str, keys: list):
+        """Instance method wrapper for the static method (legacy support)."""
+        return self._extract_data_from_dict_static(file_path, keys)
+
+    # _compute_or_load_stats REMAINS THE SAME AS ORIGINAL
     def _compute_or_load_stats(self):
         """Computes or loads normalization statistics (mean and std)."""
         stats_path = os.path.join(self.root_dir, "stats.pt")
@@ -261,14 +332,15 @@ class MeshToGridDataset(Dataset):
                 out_path = os.path.join(self.root_dir, case, "solutions.npy")
                 if not os.path.exists(in_path) or not os.path.exists(out_path):
                     continue
-                in_list.append(self._extract_data_from_dict(in_path, self.input_keys))
+                # Use the static method here too
+                in_list.append(self._extract_data_from_dict_static(in_path, self.input_keys))
                 out_list.append(
-                    self._extract_data_from_dict(out_path, self.output_keys)
+                    self._extract_data_from_dict_static(out_path, self.output_keys)
                 )
 
-            all_in, all_out = np.concatenate(in_list, axis=0), np.concatenate(
-                out_list, axis=0
-            )
+            all_in = np.concatenate(in_list, axis=0)
+            all_out = np.concatenate(out_list, axis=0)
+
             self.input_mean = torch.tensor(all_in.mean(axis=0), dtype=torch.float32)
             self.input_std = (
                 torch.tensor(all_in.std(axis=0), dtype=torch.float32) + 1e-8
