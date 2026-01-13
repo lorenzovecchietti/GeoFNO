@@ -60,6 +60,8 @@ def train_and_evaluate():
         collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -68,6 +70,8 @@ def train_and_evaluate():
         collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4,
     )
 
     model = GeoFNO(

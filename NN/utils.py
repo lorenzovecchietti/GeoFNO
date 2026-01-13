@@ -13,35 +13,15 @@ from matplotlib import tri
 
 def collate_fn(batch):
     """
-    Custom collate function to handle variable-sized mesh data in batches.
-    Pads meshes to the maximum size in the batch and creates a mask.
+    Fast collate function for pre-padded data.
+    Since all samples are pre-padded during dataset initialization,
+    this just stacks tensors without any dynamic padding.
     """
-    max_n = max(item["y_mesh"].shape[0] for item in batch)
-    x_grids, y_meshes, coords, masks = [], [], [], []
-
-    for item in batch:
-        x_grids.append(item["x_grid"])
-        y, c = item["y_mesh"], item["query_coords"]
-        n = y.shape[0]
-        padding_len = max_n - n
-
-        mask = torch.cat([torch.ones(n), torch.zeros(padding_len)], dim=0)
-        masks.append(mask)
-
-        if padding_len > 0:
-            y_pad = torch.cat([y, torch.zeros(padding_len, y.shape[1])], dim=0)
-            c_pad = torch.cat([c, torch.zeros(padding_len, c.shape[1])], dim=0)
-        else:
-            y_pad, c_pad = y, c
-
-        y_meshes.append(y_pad)
-        coords.append(c_pad)
-
     return {
-        "x_grid": torch.stack(x_grids),
-        "y_mesh": torch.stack(y_meshes),
-        "query_coords": torch.stack(coords),
-        "mask": torch.stack(masks),
+        "x_grid": torch.stack([item["x_grid"] for item in batch]),
+        "y_mesh": torch.stack([item["y_mesh"] for item in batch]),
+        "query_coords": torch.stack([item["query_coords"] for item in batch]),
+        "mask": torch.stack([item["mask"] for item in batch]),
     }
 
 
@@ -266,45 +246,51 @@ def plot_history(train_losses, test_errors, save_dir):
 def augment_batch(x_grid, y_mesh, coords):
     """
     Applies random flips and rotations (0, 90, 180, 270 degrees) for data augmentation.
+    Optimized to clone only once at the start to minimize memory allocations.
 
     x_grid channels: [conductivity, power, x, y, mask, vel_inlet_x, vel_inlet_y]
     y_mesh channels: [T, vx, vy]
     """
-    # Random horizontal flip
-    if torch.rand(1) < 0.5:
-        x_grid = x_grid.clone()
-        x_grid = x_grid.flip(2)
-        coords = coords.clone()
-        coords[..., 1] = -coords[..., 1]
-        y_mesh = y_mesh.clone()
-        y_mesh[..., 2] = -y_mesh[..., 2]  # Flip vy component (index 2)
-        # Flip vel_inlet_y component (channel 6)
-        x_grid[:, 6, ...] = -x_grid[:, 6, ...]
-
-    # Random rotation in 90-degree increments
+    do_flip = torch.rand(1).item() < 0.5
     k = torch.randint(0, 4, (1,)).item()
+
+    # Early return if no augmentation needed
+    if not do_flip and k == 0:
+        return x_grid, y_mesh, coords
+
+    # Clone once at the start (only if we need to modify)
+    x_grid = x_grid.clone()
+    y_mesh = y_mesh.clone()
+    coords = coords.clone()
+
+    # Horizontal flip
+    if do_flip:
+        x_grid = x_grid.flip(2)
+        coords[..., 1] = -coords[..., 1]
+        y_mesh[..., 2] = -y_mesh[..., 2]  # Flip vy
+        x_grid[:, 6, ...] = -x_grid[:, 6, ...]  # Flip vel_inlet_y
+
+    # Rotation in 90-degree increments
     if k > 0:
-        x_grid = x_grid.clone()
         x_grid = torch.rot90(x_grid, k, [2, 3])
 
-        # Apply rotation matrix to coordinates
+        # Precompute rotation matrix
         rad = k * (np.pi / 2)
+        cos_r, sin_r = np.cos(rad), np.sin(rad)
         rot_matrix = torch.tensor(
-            [[np.cos(rad), -np.sin(rad)], [np.sin(rad), np.cos(rad)]],
+            [[cos_r, -sin_r], [sin_r, cos_r]],
             device=coords.device,
             dtype=coords.dtype,
         )
 
+        # Rotate coordinates
         coords = torch.matmul(coords, rot_matrix.T)
 
-        # Rotate velocity vectors in output (vx, vy at indices 1, 2)
-        y_mesh = y_mesh.clone()
-        vel = y_mesh[..., 1:3]
-        vel_rot = torch.matmul(vel, rot_matrix.T)
+        # Rotate velocity in output
+        vel_rot = torch.matmul(y_mesh[..., 1:3], rot_matrix.T)
         y_mesh[..., 1:3] = vel_rot
 
-        # Rotate vel_inlet vector in input (channels 5, 6)
-        # x_grid shape: (B, C, H, W) -> need to apply rotation per-pixel
+        # Rotate vel_inlet in input (channels 5, 6)
         vel_inlet = torch.stack([x_grid[:, 5, ...], x_grid[:, 6, ...]], dim=-1)
         vel_inlet_rot = torch.matmul(vel_inlet, rot_matrix.T.to(x_grid.device))
         x_grid[:, 5, ...] = vel_inlet_rot[..., 0]

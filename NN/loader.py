@@ -260,7 +260,7 @@ class MeshToGridDataset(Dataset):
         }
 
     def _pre_load_data(self):
-        """Pre-loads all dataset cases into RAM using Multiprocessing."""
+        """Pre-loads all dataset cases into RAM using Multiprocessing with pre-padding."""
         print(f"Pre-loading {len(self.cases)} cases with {self.num_workers} workers...")
 
         # Prepare stats dictionary to pass to workers
@@ -288,27 +288,42 @@ class MeshToGridDataset(Dataset):
         )
 
         # Use ProcessPoolExecutor to run in parallel
-        results = []
         with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-            # Map preserves order
             results_iter = list(tqdm(
                 executor.map(worker_func, self.cases),
                 total=len(self.cases),
                 desc="Loading Data"
             ))
 
-        # Convert back to Tensor in the main process
-        # This avoids sharing Torch tensors across process boundaries which can be buggy
-        print("Finalizing tensors...")
+        # Find max_nodes for pre-padding (eliminates dynamic padding in collate_fn)
+        max_nodes = max(res["y_mesh"].shape[0] for res in results_iter)
+        print(f"Pre-padding all samples to max_nodes={max_nodes}...")
+
+        # Convert to Tensor and pre-pad in the main process
         for res in results_iter:
+            n_nodes = res["y_mesh"].shape[0]
+            pad_len = max_nodes - n_nodes
+
+            # Create mask before padding
+            mask = np.ones(max_nodes, dtype=np.float32)
+            if pad_len > 0:
+                mask[n_nodes:] = 0.0
+                # Pad y_mesh and query_coords
+                y_padded = np.pad(res["y_mesh"], ((0, pad_len), (0, 0)), mode='constant')
+                c_padded = np.pad(res["query_coords"], ((0, pad_len), (0, 0)), mode='constant')
+            else:
+                y_padded = res["y_mesh"]
+                c_padded = res["query_coords"]
+
             self.data_cache.append({
                 "x_grid": torch.from_numpy(res["x_grid"]).float(),
-                "y_mesh": torch.from_numpy(res["y_mesh"]).float(),
-                "query_coords": torch.from_numpy(res["query_coords"]).float(),
-                "mask": torch.from_numpy(res["mask"]).float(),
+                "y_mesh": torch.from_numpy(y_padded).float(),
+                "query_coords": torch.from_numpy(c_padded).float(),
+                "mask": torch.from_numpy(mask).float(),
             })
 
-        print("Data pre-loaded successfully.")
+        self.max_nodes = max_nodes
+        print(f"Data pre-loaded successfully. All samples padded to {max_nodes} nodes.")
 
     def _extract_data_from_dict(self, file_path: str, keys: list):
         """Instance method wrapper for the static method (legacy support)."""
