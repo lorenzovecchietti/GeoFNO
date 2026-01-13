@@ -100,7 +100,7 @@ class FNOBlock(nn.Module):
 class DecoderHead(nn.Module):
     """
     Modular decoder head for coordinate injection MLP.
-    Used for separate temperature and velocity predictions.
+    Used for temperature prediction.
     """
 
     def __init__(self, in_features, hidden_dim, out_features, dropout_rate):
@@ -131,7 +131,7 @@ class GeoFNO(nn.Module):
     Extends FNO by utilizing coordinate injection in the decoder to handle
     geometric queries and irregular mesh predictions.
 
-    Uses separate decoder heads for temperature and velocity.
+    Predicts only temperature field.
     """
 
     def __init__(self, modes1, modes2, width, dropout_rate):
@@ -141,19 +141,18 @@ class GeoFNO(nn.Module):
         self.width = width
 
         # Encoder: Projects the multi-channel input to latent space
-        # Input channels: conductivity, power, x, y, mask, vel_inlet_x, vel_inlet_y
-        self.fc0 = nn.Conv2d(7, self.width, 1)
+        # Input channels: conductivity, power, x, y, mask, vel_inlet (scalar)
+        self.fc0 = nn.Conv2d(6, self.width, 1)
 
         # Body: Sequential FNO layers
         self.fno_blocks = nn.ModuleList(
             [FNOBlock(self.width, self.modes1, self.modes2) for _ in range(4)]
         )
 
-        # Separate Decoder Heads with Coordinate Injection
+        # Decoder Head with Coordinate Injection
         # Input: Width (latent features) + 2 (physical X,Y coordinates)
         decoder_in = self.width + 2
         self.decoder_T = DecoderHead(decoder_in, 128, 1, dropout_rate)  # Temperature
-        self.decoder_V = DecoderHead(decoder_in, 128, 2, dropout_rate)  # Velocity (vx, vy)
 
     def forward(self, x_grid, query_coords):
         """
@@ -164,7 +163,7 @@ class GeoFNO(nn.Module):
             query_coords: Query coordinates on the mesh (B, N, 2)
 
         Returns:
-            Predicted values at query coordinates (B, N, 3) - [T, vx, vy]
+            Predicted temperature at query coordinates (B, N, 1)
         """
         # 1. Grid Encoding
         x = self.fc0(x_grid)
@@ -189,12 +188,8 @@ class GeoFNO(nn.Module):
         # Concatenate latent features with exact physical coordinates
         x_cat = torch.cat([x_sampled, query_coords], dim=-1)
 
-        # 5. Point-wise Decoding with Separate Heads
+        # 5. Point-wise Decoding
         out_T = self.decoder_T(x_cat)  # (B, N, 1)
-        out_V = self.decoder_V(x_cat)  # (B, N, 2)
 
-        # Combine outputs: T, vx, vy
-        out = torch.cat([out_T, out_V], dim=-1)
-
-        return out
+        return out_T
 

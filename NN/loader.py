@@ -233,11 +233,9 @@ class MeshToGridDataset(Dataset):
             grid_channels.append(grid_y.astype(np.float32))
             grid_channels.append(grid_mask.astype(np.float32))
 
-            # Vel Inlet channels
-            vel_inlet_x = np.full_like(grid_x, vel_inlet, dtype=np.float32)
-            vel_inlet_y = np.zeros_like(grid_y, dtype=np.float32)
-            grid_channels.append(vel_inlet_x)
-            grid_channels.append(vel_inlet_y)
+            # Vel Inlet channel (single scalar value)
+            vel_inlet_scalar = np.full_like(grid_x, vel_inlet, dtype=np.float32)
+            grid_channels.append(vel_inlet_scalar)
 
             input_grid = np.stack(grid_channels, axis=0).astype(np.float32)
             np.save(grid_cache_path, input_grid)

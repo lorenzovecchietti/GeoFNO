@@ -24,9 +24,9 @@ LR = 1e-3
 PATIENCE = 20
 NUM_EXAMPLES = 10
 
-# Loss weights for multi-task learning
+# Loss weight for temperature (velocity prediction removed)
 W_TEMP = 1.0  # Weight for temperature loss (L2 relative)
-W_VEL = 0   # Weight for velocity loss (L1)
+W_VEL = 0    # Not used (kept for API compatibility)
 
 
 # pylint: disable=too-many-locals, too-many-statements, too-many-branches
@@ -45,8 +45,8 @@ def train_and_evaluate():
         root_dir="./../data_generation/dataset",
         grid_size=(128, 128),
         input_keys=["conductivity", "power"],
-        output_keys=["temperature", "vx", "vy"],
-        force_recompute=False,  # Recompute to include vel_inlet channels
+        output_keys=["temperature"],  # Only temperature prediction
+        force_recompute=False,
     )
 
     train_size = int(0.8 * len(full_dataset))

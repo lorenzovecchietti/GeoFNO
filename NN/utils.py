@@ -27,40 +27,28 @@ def collate_fn(batch):
 
 def compute_masked_loss(pred, target, mask, w_temp=1.0, w_vel=1.0):
     """
-    Computes weighted multi-task loss for temperature and velocity.
+    Computes relative L2 loss for temperature prediction.
 
     Args:
-        pred: Predictions (B, N, 3) - [T, vx, vy]
-        target: Ground truth (B, N, 3) - [T, vx, vy]
+        pred: Temperature predictions (B, N, 1)
+        target: Ground truth temperature (B, N, 1)
         mask: Valid node mask (B, N)
-        w_temp: Weight for temperature loss (L2 relative)
-        w_vel: Weight for velocity loss (L1)
+        w_temp: Weight for temperature loss (kept for API compatibility)
+        w_vel: Not used (kept for API compatibility)
 
     Returns:
-        Weighted combined loss
+        Relative L2 loss for temperature
     """
     mask_expanded = mask.unsqueeze(-1)
     pred = pred * mask_expanded
     target = target * mask_expanded
 
     # Temperature: Relative L2 loss
-    pred_T = pred[..., 0:1]
-    target_T = target[..., 0:1]
-    diff_T = torch.norm(pred_T - target_T, p=2, dim=(1, 2))
-    norm_T = torch.norm(target_T, p=2, dim=(1, 2))
+    diff_T = torch.norm(pred - target, p=2, dim=(1, 2))
+    norm_T = torch.norm(target, p=2, dim=(1, 2))
     loss_T = (diff_T / (norm_T + 1e-8)).mean()
 
-    # Velocity: L1 loss (robust to localized peaks)
-    pred_V = pred[..., 1:3]
-    target_V = target[..., 1:3]
-    # Normalize by number of valid nodes
-    n_valid = mask.sum(dim=1, keepdim=True).clamp(min=1)
-    loss_V = (torch.abs(pred_V - target_V).sum(dim=(1, 2)) / n_valid.squeeze()).mean()
-
-    # Combined weighted loss
-    loss = w_temp * loss_T + w_vel * loss_V
-
-    return loss
+    return loss_T
 
 
 
@@ -110,17 +98,14 @@ def visualize_sample(
     # 3. Mesh Reconstruction
     triang = tri.Triangulation(phys_x, phys_y)
 
-    # 4. Physical Field Extraction (output format: T, vx, vy)
+    # 4. Physical Field Extraction (output format: T only)
     t_gt = t_vals[:, 0]
-    vel_mag_gt = np.sqrt(t_vals[:, 1] ** 2 + t_vals[:, 2] ** 2)
     t_pred = p_vals[:, 0]
-    vel_mag_pred = np.sqrt(p_vals[:, 1] ** 2 + p_vals[:, 2] ** 2)
-    t_err = np.abs(t_gt - t_pred)
-    vel_err = np.abs(vel_mag_gt - vel_mag_pred)
-
-    # Compute shared colorbar scales
-    vel_min = min(vel_mag_gt.min(), vel_mag_pred.min())
-    vel_max = max(vel_mag_gt.max(), vel_mag_pred.max())
+    
+    # Compute relative error in percentage
+    t_err_relative = np.abs((t_gt - t_pred) / (t_gt + 1e-8)) * 100.0
+    
+    # Compute shared colorbar scales for temperature
     t_min = min(t_gt.min(), t_pred.min())
     t_max = max(t_gt.max(), t_pred.max())
 
@@ -132,79 +117,60 @@ def visualize_sample(
     conductivity_masked = np.where(domain_mask > 0.5, conductivity, np.nan)
     power_masked = np.where(domain_mask > 0.5, power, np.nan)
 
-    # 5. Plotting
-    fig, axs = plt.subplots(3, 3, figsize=(18, 15), constrained_layout=True)
+    # 5. Plotting (2x3 grid: Temperature row + Input fields row)
+    fig, axs = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
 
-    cols = ["Ground Truth", "Prediction", "Absolute Error"]
-    for ax, col in zip(axs[0], cols):
-        ax.set_title(col, fontsize=16, pad=10)
-
-    # Velocity Magnitude plots
+    # Temperature row
+    axs[0, 0].set_title("Ground Truth Temperature", fontsize=16, pad=10)
     im0 = axs[0, 0].tripcolor(
-        triang, vel_mag_gt, shading="gouraud", cmap="turbo", vmin=vel_min, vmax=vel_max
+        triang, t_gt, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
     )
-    axs[0, 0].set_ylabel("Velocity Magnitude [m/s]", fontsize=14)
+    axs[0, 0].set_ylabel("Temperature [K]", fontsize=14)
     fig.colorbar(im0, ax=axs[0, 0], fraction=0.046, pad=0.04)
 
+    axs[0, 1].set_title("Predicted Temperature", fontsize=16, pad=10)
     im1 = axs[0, 1].tripcolor(
-        triang,
-        vel_mag_pred,
-        shading="gouraud",
-        cmap="turbo",
-        vmin=vel_min,
-        vmax=vel_max,
+        triang, t_pred, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
     )
     fig.colorbar(im1, ax=axs[0, 1], fraction=0.046, pad=0.04)
 
-    im2 = axs[0, 2].tripcolor(triang, vel_err, shading="gouraud", cmap="inferno")
-    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046, pad=0.04)
-
-    # Temperature plots
-    im3 = axs[1, 0].tripcolor(
-        triang, t_gt, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
+    axs[0, 2].set_title("Relative Error (%)", fontsize=16, pad=10)
+    im2 = axs[0, 2].tripcolor(
+        triang, t_err_relative, shading="gouraud", cmap="hot", vmin=0, vmax=10
     )
-    axs[1, 0].set_ylabel("Temperature [K]", fontsize=14)
-    fig.colorbar(im3, ax=axs[1, 0], fraction=0.046, pad=0.04)
+    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046, pad=0.04, label='Error %')
 
-    im4 = axs[1, 1].tripcolor(
-        triang, t_pred, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
-    )
-    fig.colorbar(im4, ax=axs[1, 1], fraction=0.046, pad=0.04)
-
-    im5 = axs[1, 2].tripcolor(triang, t_err, shading="gouraud", cmap="inferno")
-    fig.colorbar(im5, ax=axs[1, 2], fraction=0.046, pad=0.04)
-
-    # Input fields plots
-    axs[2, 0].set_title("Conductivity (Input)", fontsize=16, pad=10)
-    im6 = axs[2, 0].imshow(
+    # Input fields row
+    axs[1, 0].set_title("Conductivity (Input)", fontsize=16, pad=10)
+    im3 = axs[1, 0].imshow(
         conductivity_masked,
         extent=[0, len_x, 0, len_y],
         origin="lower",
         cmap="viridis",
         aspect="equal",
     )
-    axs[2, 0].set_ylabel("Input Fields", fontsize=14)
-    fig.colorbar(im6, ax=axs[2, 0], fraction=0.046, pad=0.04)
+    axs[1, 0].set_ylabel("Input Fields", fontsize=14)
+    fig.colorbar(im3, ax=axs[1, 0], fraction=0.046, pad=0.04)
 
-    axs[2, 1].set_title("Power (Input)", fontsize=16, pad=10)
-    im7 = axs[2, 1].imshow(
+    axs[1, 1].set_title("Power (Input)", fontsize=16, pad=10)
+    im4 = axs[1, 1].imshow(
         power_masked,
         extent=[0, len_x, 0, len_y],
         origin="lower",
         cmap="hot",
         aspect="equal",
     )
-    fig.colorbar(im7, ax=axs[2, 1], fraction=0.046, pad=0.04)
+    fig.colorbar(im4, ax=axs[1, 1], fraction=0.046, pad=0.04)
 
-    axs[2, 2].set_title("Domain Mask", fontsize=16, pad=10)
-    im8 = axs[2, 2].imshow(
+    axs[1, 2].set_title("Domain Mask", fontsize=16, pad=10)
+    im5 = axs[1, 2].imshow(
         domain_mask,
         extent=[0, len_x, 0, len_y],
         origin="lower",
         cmap="gray",
         aspect="equal",
     )
-    fig.colorbar(im8, ax=axs[2, 2], fraction=0.046, pad=0.04)
+    fig.colorbar(im5, ax=axs[1, 2], fraction=0.046, pad=0.04)
 
     for ax in axs.flat:
         ax.set_aspect("equal")
@@ -248,8 +214,8 @@ def augment_batch(x_grid, y_mesh, coords):
     Applies random flips and rotations (0, 90, 180, 270 degrees) for data augmentation.
     Optimized to clone only once at the start to minimize memory allocations.
 
-    x_grid channels: [conductivity, power, x, y, mask, vel_inlet_x, vel_inlet_y]
-    y_mesh channels: [T, vx, vy]
+    x_grid channels: [conductivity, power, x, y, mask, vel_inlet]
+    y_mesh channels: [T]
     """
     do_flip = torch.rand(1).item() < 0.5
     k = torch.randint(0, 4, (1,)).item()
@@ -267,8 +233,7 @@ def augment_batch(x_grid, y_mesh, coords):
     if do_flip:
         x_grid = x_grid.flip(2)
         coords[..., 1] = -coords[..., 1]
-        y_mesh[..., 2] = -y_mesh[..., 2]  # Flip vy
-        x_grid[:, 6, ...] = -x_grid[:, 6, ...]  # Flip vel_inlet_y
+        # No velocity field to flip in y_mesh (only temperature)
 
     # Rotation in 90-degree increments
     if k > 0:
@@ -285,16 +250,7 @@ def augment_batch(x_grid, y_mesh, coords):
 
         # Rotate coordinates
         coords = torch.matmul(coords, rot_matrix.T)
-
-        # Rotate velocity in output
-        vel_rot = torch.matmul(y_mesh[..., 1:3], rot_matrix.T)
-        y_mesh[..., 1:3] = vel_rot
-
-        # Rotate vel_inlet in input (channels 5, 6)
-        vel_inlet = torch.stack([x_grid[:, 5, ...], x_grid[:, 6, ...]], dim=-1)
-        vel_inlet_rot = torch.matmul(vel_inlet, rot_matrix.T.to(x_grid.device))
-        x_grid[:, 5, ...] = vel_inlet_rot[..., 0]
-        x_grid[:, 6, ...] = vel_inlet_rot[..., 1]
+        # No velocity vectors to rotate (vel_inlet is scalar, y_mesh is temperature only)
 
     return x_grid, y_mesh, coords
 
