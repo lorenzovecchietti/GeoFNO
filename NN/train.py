@@ -18,7 +18,7 @@ from utils import (
     visualize_sample, plot_history,
 )
 
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 EPOCHS = 100
 LR = 1e-3
 PATIENCE = 20
@@ -26,7 +26,7 @@ NUM_EXAMPLES = 10
 
 # Loss weights for multi-task learning
 W_TEMP = 1.0  # Weight for temperature loss (L2 relative)
-W_VEL = 5.0   # Weight for velocity loss (L1)
+W_VEL = 1.0   # Weight for velocity loss (L1)
 
 
 # pylint: disable=too-many-locals, too-many-statements, too-many-branches
@@ -75,9 +75,9 @@ def train_and_evaluate():
     )
 
     model = GeoFNO(
-        modes1=32,
+        modes1=16,
         modes2=32,
-        width=128,
+        width=256,
         dropout_rate=0.1
     ).to(device)
     
@@ -103,11 +103,6 @@ def train_and_evaluate():
 
             # Data Augmentation
             x_grid, y_mesh, coords = augment_batch(x_grid, y_mesh, coords)
-
-            # Input Noise
-            if model.training:
-                noise = torch.randn_like(x_grid[:, :2, ...]) * 0.001
-                x_grid[:, :2, ...] = x_grid[:, :2, ...] + noise
 
             optimizer.zero_grad()
             out = model(x_grid, coords)
