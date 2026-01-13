@@ -21,7 +21,7 @@ from utils import (
 BATCH_SIZE = 16
 EPOCHS = 1000
 LR = 1e-2
-PATIENCE = 50
+PATIENCE = 20
 NUM_EXAMPLES = 10
 
 
