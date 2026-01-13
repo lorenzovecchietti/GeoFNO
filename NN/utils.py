@@ -66,6 +66,8 @@ def visualize_sample(
     filename_prefix="prediction",
     len_x=20,
     len_y=5,
+    output_mean=None,
+    output_std=None,
 ):
     """
     Generates FEM-style visualization plots.
@@ -89,6 +91,25 @@ def visualize_sample(
     c_valid = c_norm[valid_indices]
     t_vals = t[valid_indices]
     p_vals = p[valid_indices]
+
+    # Denormalize temperature values if statistics are provided
+    if output_mean is not None and output_std is not None:
+        # Convert to numpy if needed
+        if hasattr(output_mean, 'numpy'):
+            mean_np = output_mean.cpu().numpy()
+            std_np = output_std.cpu().numpy()
+        else:
+            mean_np = output_mean
+            std_np = output_std
+        
+        # Denormalize: T = T_normalized * std + mean
+        t_vals = t_vals * std_np + mean_np
+        p_vals = p_vals * std_np + mean_np
+        
+        # Subtract reference temperature to show only temperature rise
+        T_ref = 293.15  # Reference temperature in Kelvin (20°C)
+        t_vals = t_vals - T_ref
+        p_vals = p_vals - T_ref
 
     # 2. Geometric Denormalization
     c_01 = (c_valid + 1) / 2.0
@@ -125,7 +146,7 @@ def visualize_sample(
     im0 = axs[0, 0].tripcolor(
         triang, t_gt, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
     )
-    axs[0, 0].set_ylabel("Temperature [K]", fontsize=14)
+    axs[0, 0].set_ylabel("ΔT [K]", fontsize=14)
     fig.colorbar(im0, ax=axs[0, 0], fraction=0.046, pad=0.04)
 
     axs[0, 1].set_title("Predicted Temperature", fontsize=16, pad=10)
