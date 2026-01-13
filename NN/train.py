@@ -201,6 +201,8 @@ def train_and_evaluate():
                     save_dir=test_vis_dir,
                     sample_idx=i,
                     filename_prefix=f"test_sample_{count:03d}",
+                    output_mean=full_dataset.output_mean,
+                    output_std=full_dataset.output_std,
                 )
                 count += 1
 
