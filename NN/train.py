@@ -26,7 +26,6 @@ NUM_EXAMPLES = 10
 
 # Loss weight for temperature (velocity prediction removed)
 W_TEMP = 1.0  # Weight for temperature loss (L2 relative)
-W_VEL = 0    # Not used (kept for API compatibility)
 
 
 # pylint: disable=too-many-locals, too-many-statements, too-many-branches
