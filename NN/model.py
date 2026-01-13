@@ -107,15 +107,21 @@ class DecoderHead(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(in_features, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, out_features)
+        # Skip connection: the last layer receives the concatenation of 
+        # hidden features and the original input features
+        self.fc3 = nn.Linear(hidden_dim + in_features, out_features)
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, x):
+    def forward(self, x_in):
         """Forward pass for decoder head."""
-        x = F.gelu(self.fc1(x))
+        x = F.gelu(self.fc1(x_in))
         x = self.dropout(x)
         x = F.gelu(self.fc2(x))
         x = self.dropout(x)
+
+        # Concatenate original inputs (skip connection)
+        x = torch.cat([x, x_in], dim=-1)
+
         return self.fc3(x)
 
 
