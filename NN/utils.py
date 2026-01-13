@@ -25,7 +25,7 @@ def collate_fn(batch):
     }
 
 
-def compute_masked_loss(pred, target, mask, w_temp=1.0, w_vel=1.0):
+def compute_masked_loss(pred, target, mask):
     """
     Computes relative L2 loss for temperature prediction.
 
@@ -33,8 +33,6 @@ def compute_masked_loss(pred, target, mask, w_temp=1.0, w_vel=1.0):
         pred: Temperature predictions (B, N, 1)
         target: Ground truth temperature (B, N, 1)
         mask: Valid node mask (B, N)
-        w_temp: Weight for temperature loss (kept for API compatibility)
-        w_vel: Not used (kept for API compatibility)
 
     Returns:
         Relative L2 loss for temperature

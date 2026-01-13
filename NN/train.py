@@ -18,14 +18,11 @@ from utils import (
     visualize_sample, plot_history,
 )
 
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 EPOCHS = 1000
-LR = 1e-3
-PATIENCE = 20
+LR = 1e-2
+PATIENCE = 50
 NUM_EXAMPLES = 10
-
-# Loss weight for temperature (velocity prediction removed)
-W_TEMP = 1.0  # Weight for temperature loss (L2 relative)
 
 
 # pylint: disable=too-many-locals, too-many-statements, too-many-branches
@@ -77,7 +74,7 @@ def train_and_evaluate():
         modes1=16,
         modes2=32,
         width=256,
-        dropout_rate=0.1
+        dropout_rate=0.05
     ).to(device)
     
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
@@ -105,7 +102,7 @@ def train_and_evaluate():
 
             optimizer.zero_grad()
             out = model(x_grid, coords)
-            loss = compute_masked_loss(out, y_mesh, mask, w_temp=W_TEMP, w_vel=W_VEL)
+            loss = compute_masked_loss(out, y_mesh, mask)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -129,7 +126,7 @@ def train_and_evaluate():
                 mask = batch["mask"].to(device)
 
                 out = model(x_grid, coords)
-                test_err += compute_masked_loss(out, y_mesh, mask, w_temp=W_TEMP, w_vel=W_VEL).item()
+                test_err += compute_masked_loss(out, y_mesh, mask).item()
 
         avg_test = test_err / len(test_loader)
         test_hist.append(avg_test)
