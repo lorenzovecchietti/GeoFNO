@@ -10,7 +10,7 @@ from typing import Tuple
 import numba
 import numpy as np
 from data import MAX_ITERS, MESH_FILE, MESH_SIZE, NU, OUTPUT_FOLDER, TOL, VEL_INLET
-from generate_mesh import CircuitBoard, generate_gmsh_mesh_2d
+from mesh import CircuitBoard, generate_gmsh_mesh_2d
 from pypardiso import spsolve
 from skfem import (
     Basis,
