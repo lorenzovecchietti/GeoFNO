@@ -10,19 +10,19 @@ import torch
 from loader import MeshToGridDataset
 from model import GeoFNO
 from torch import optim
+from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader, random_split
 from utils import (
     augment_batch,
     collate_fn,
-    compute_masked_loss,
     plot_history,
     visualize_sample,
 )
 
 BATCH_SIZE = 8
-EPOCHS = 100
-LR = 1e-3
-PATIENCE = 20
+EPOCHS = 2000
+LR = 5e-2
+PATIENCE = 50
 NUM_EXAMPLES = 10
 
 
@@ -97,7 +97,7 @@ def train_and_evaluate():
 
             optimizer.zero_grad()
             out = model(x_grid, coords)
-            loss = compute_masked_loss(out, y_mesh)
+            loss = mse_loss(out, y_mesh, reduction="mean")
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -120,7 +120,7 @@ def train_and_evaluate():
                 coords = batch["query_coords"].to(device)
 
                 out = model(x_grid, coords)
-                test_err += compute_masked_loss(out, y_mesh).item()
+                test_err += mse_loss(out, y_mesh, reduction="mean").item()
 
         avg_test = test_err / len(test_loader)
         test_hist.append(avg_test)

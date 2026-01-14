@@ -25,27 +25,6 @@ def collate_fn(batch):
     }
 
 
-def compute_masked_loss(pred, target):
-    """
-    Computes relative L2 loss for temperature prediction.
-
-    Args:
-        pred: Temperature predictions (B, N, 1)
-        target: Ground truth temperature (B, N, 1)
-        mask: Valid node mask (B, N)
-
-    Returns:
-        Relative L2 loss for temperature
-    """
-
-    # Temperature: Relative L2 loss
-    diff_t = torch.norm(pred - target, p=2, dim=(1, 2))
-    norm_t = torch.norm(target, p=2, dim=(1, 2))
-    loss_t = (diff_t / (norm_t + 1e-8)).mean()
-
-    return loss_t
-
-
 # pylint: disable=too-many-arguments, too-many-positional-arguments
 # pylint: disable=too-many-locals, too-many-statements
 def visualize_sample(
@@ -116,7 +95,7 @@ def visualize_sample(
     # 4. Physical Field Extraction (output format: T only)
     t_gt = t_vals[:, 0]
     t_pred = p_vals[:, 0]
-    t_range = t_vals[:, 0].max() - t_vals[:, 0].min()
+    t_range = t_gt.max() - t_gt.min()
 
     # Compute relative error in percentage
     t_err_relative = np.abs(t_gt - t_pred) / t_range * 100.0
