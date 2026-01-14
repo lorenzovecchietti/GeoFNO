@@ -1,0 +1,29 @@
+--- Starting Case 413 ---
+Generating mesh at dataset\case_413\mesh.msh...
+
+Initializing Finite Elements...
+  -> Total DOFs: 86953
+Setting up Boundary Conditions...
+Initializing with Stokes...
+  -> Stokes initialization successful.
+
+Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
+
+--- STEP 1/1: Nu = 1.00e-05 ---
+  Static Assembly: 24.0709s
+  Iter  1: err=6.32e-01(35.267s)
+  Iter  2: err=2.11e-01(34.960s)
+  Iter  3: err=8.79e-02(36.683s)
+  Iter  4: err=4.95e-02(36.827s)
+  Iter  5: err=3.26e-02(37.706s)
+  Iter  6: err=1.90e-02(37.252s)
+  Iter  7: err=1.10e-02(37.294s)
+  Iter  8: err=6.54e-03(37.770s)
+  Iter  9: err=3.99e-03(37.679s)
+  Convergence reached.
+Initializing Thermal Finite Elements (P1)...
+Mapping Velocity...
+Assembling Thermal System...
+Solving Thermal Linear System...
+  -> Solved. Range: [293.15, 441.94] K
+Case 413 completed successfully.

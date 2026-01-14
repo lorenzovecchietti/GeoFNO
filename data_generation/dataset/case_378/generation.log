@@ -1,0 +1,31 @@
+--- Starting Case 378 ---
+Generating mesh at dataset\case_378\mesh.msh...
+
+Initializing Finite Elements...
+  -> Total DOFs: 81787
+Setting up Boundary Conditions...
+Initializing with Stokes...
+  -> Stokes initialization successful.
+
+Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
+
+--- STEP 1/1: Nu = 1.00e-05 ---
+  Static Assembly: 24.3713s
+  Iter  1: err=8.09e-01(34.501s)
+  Iter  2: err=2.56e-01(36.362s)
+  Iter  3: err=1.09e-01(35.885s)
+  Iter  4: err=6.33e-02(35.925s)
+  Iter  5: err=4.00e-02(35.146s)
+  Iter  6: err=2.61e-02(35.467s)
+  Iter  7: err=1.75e-02(34.670s)
+  Iter  8: err=1.20e-02(34.876s)
+  Iter  9: err=8.45e-03(35.579s)
+  Iter 10: err=6.13e-03(36.738s)
+  Iter 11: err=4.54e-03(35.084s)
+  Convergence reached.
+Initializing Thermal Finite Elements (P1)...
+Mapping Velocity...
+Assembling Thermal System...
+Solving Thermal Linear System...
+  -> Solved. Range: [293.12, 383.94] K
+Case 378 completed successfully.
