@@ -97,34 +97,6 @@ class FNOBlock(nn.Module):
 
 
 # pylint: disable=too-many-instance-attributes
-class DecoderHead(nn.Module):
-    """
-    Modular decoder head for coordinate injection MLP.
-    Used for temperature prediction.
-    """
-
-    def __init__(self, in_features, hidden_dim, out_features, dropout_rate):
-        super().__init__()
-        self.fc1 = nn.Linear(in_features, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        # Skip connection: the last layer receives the concatenation of 
-        # hidden features and the original input features
-        self.fc3 = nn.Linear(hidden_dim + in_features, out_features)
-        self.dropout = nn.Dropout(dropout_rate)
-
-    def forward(self, x_in):
-        """Forward pass for decoder head."""
-        x = F.gelu(self.fc1(x_in))
-        x = self.dropout(x)
-        x = F.gelu(self.fc2(x))
-        x = self.dropout(x)
-
-        # Concatenate original inputs (skip connection)
-        x = torch.cat([x, x_in], dim=-1)
-
-        return self.fc3(x)
-
-
 class GeoFNO(nn.Module):
     """
     Geometric Fourier Neural Operator (GeoFNO).
@@ -146,13 +118,12 @@ class GeoFNO(nn.Module):
 
         # Body: Sequential FNO layers
         self.fno_blocks = nn.ModuleList(
-            [FNOBlock(self.width, self.modes1, self.modes2) for _ in range(4)]
+            [FNOBlock(self.width, self.modes1, self.modes2) for _ in range(6)]
         )
 
-        # Decoder Head with Coordinate Injection
-        # Input: Width (latent features) + 2 (physical X,Y coordinates)
-        decoder_in = self.width + 2
-        self.decoder_T = DecoderHead(decoder_in, 128, 1, dropout_rate)  # Temperature
+        self.fc1 = nn.Linear(self.width + 2, self.width + 2)  # Temperature
+        self.dropout = nn.Dropout(dropout_rate)
+        self.fc2 = nn.Linear(self.width + 2, 1)  # Temperature
 
     def forward(self, x_grid, query_coords):
         """
@@ -185,11 +156,11 @@ class GeoFNO(nn.Module):
         x_sampled = x_sampled.squeeze(2).permute(0, 2, 1)
 
         # 4. Coordinate Injection
-        # Concatenate latent features with exact physical coordinates
         x_cat = torch.cat([x_sampled, query_coords], dim=-1)
 
         # 5. Point-wise Decoding
-        out_T = self.decoder_T(x_cat)  # (B, N, 1)
 
-        return out_T
-
+        x = F.gelu(self.fc1(x_cat))  # (B, N, 1)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x

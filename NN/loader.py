@@ -4,12 +4,12 @@ Revised to avoid library noise and optimize training speed using Multiprocessing
 """
 
 import contextlib
+import functools
 import io
 import logging
 import os
 import pickle
 import warnings
-import functools
 from concurrent.futures import ProcessPoolExecutor
 
 import meshio
@@ -114,6 +114,7 @@ class MeshToGridDataset(Dataset):
                 raise KeyError(f"Key '{key}' not found in {file_path}")
         return np.concatenate(extracted_arrays, axis=1)
 
+    # pylint: disable=too-many-locals, too-many-statements
     @staticmethod
     def _process_single_case(
         case_name,
@@ -184,9 +185,9 @@ class MeshToGridDataset(Dataset):
             k_values = input_nodes_raw[:, k_idx]
             vals, counts = np.unique(np.round(k_values, 5), return_counts=True)
             k_fluid_detected = vals[np.argmax(counts)]
-            node_mask_solid = (
-                np.abs(k_values - k_fluid_detected) > 1e-2
-            ).astype(np.float32)
+            node_mask_solid = (np.abs(k_values - k_fluid_detected) > 1e-2).astype(
+                np.float32
+            )
 
             # Apply Stats if normalized
             if normalize and stats_dict is not None:
@@ -258,7 +259,7 @@ class MeshToGridDataset(Dataset):
         }
 
     def _pre_load_data(self):
-        """Pre-loads all dataset cases into RAM using Multiprocessing with pre-padding."""
+        """Pre-loads all dataset cases into RAM with pre-padding."""
         print(f"Pre-loading {len(self.cases)} cases with {self.num_workers} workers...")
 
         # Prepare stats dictionary to pass to workers
@@ -282,16 +283,18 @@ class MeshToGridDataset(Dataset):
             grid_y=self.grid_y,
             force_recompute=self.force_recompute,
             stats_dict=stats_dict,
-            normalize=self.normalize
+            normalize=self.normalize,
         )
 
         # Use ProcessPoolExecutor to run in parallel
         with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-            results_iter = list(tqdm(
-                executor.map(worker_func, self.cases),
-                total=len(self.cases),
-                desc="Loading Data"
-            ))
+            results_iter = list(
+                tqdm(
+                    executor.map(worker_func, self.cases),
+                    total=len(self.cases),
+                    desc="Loading Data",
+                )
+            )
 
         # Find max_nodes for pre-padding (eliminates dynamic padding in collate_fn)
         max_nodes = max(res["y_mesh"].shape[0] for res in results_iter)
@@ -307,18 +310,24 @@ class MeshToGridDataset(Dataset):
             if pad_len > 0:
                 mask[n_nodes:] = 0.0
                 # Pad y_mesh and query_coords
-                y_padded = np.pad(res["y_mesh"], ((0, pad_len), (0, 0)), mode='constant')
-                c_padded = np.pad(res["query_coords"], ((0, pad_len), (0, 0)), mode='constant')
+                y_padded = np.pad(
+                    res["y_mesh"], ((0, pad_len), (0, 0)), mode="constant"
+                )
+                c_padded = np.pad(
+                    res["query_coords"], ((0, pad_len), (0, 0)), mode="constant"
+                )
             else:
                 y_padded = res["y_mesh"]
                 c_padded = res["query_coords"]
 
-            self.data_cache.append({
-                "x_grid": torch.from_numpy(res["x_grid"]).float(),
-                "y_mesh": torch.from_numpy(y_padded).float(),
-                "query_coords": torch.from_numpy(c_padded).float(),
-                "mask": torch.from_numpy(mask).float(),
-            })
+            self.data_cache.append(
+                {
+                    "x_grid": torch.from_numpy(res["x_grid"]).float(),
+                    "y_mesh": torch.from_numpy(y_padded).float(),
+                    "query_coords": torch.from_numpy(c_padded).float(),
+                    "mask": torch.from_numpy(mask).float(),
+                }
+            )
 
         self.max_nodes = max_nodes
         print(f"Data pre-loaded successfully. All samples padded to {max_nodes} nodes.")
@@ -346,7 +355,9 @@ class MeshToGridDataset(Dataset):
                 if not os.path.exists(in_path) or not os.path.exists(out_path):
                     continue
                 # Use the static method here too
-                in_list.append(self._extract_data_from_dict_static(in_path, self.input_keys))
+                in_list.append(
+                    self._extract_data_from_dict_static(in_path, self.input_keys)
+                )
                 out_list.append(
                     self._extract_data_from_dict_static(out_path, self.output_keys)
                 )

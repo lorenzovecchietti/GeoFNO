@@ -25,7 +25,7 @@ def collate_fn(batch):
     }
 
 
-def compute_masked_loss(pred, target, mask):
+def compute_masked_loss(pred, target):
     """
     Computes relative L2 loss for temperature prediction.
 
@@ -37,17 +37,13 @@ def compute_masked_loss(pred, target, mask):
     Returns:
         Relative L2 loss for temperature
     """
-    mask_expanded = mask.unsqueeze(-1)
-    pred = pred * mask_expanded
-    target = target * mask_expanded
 
     # Temperature: Relative L2 loss
-    diff_T = torch.norm(pred - target, p=2, dim=(1, 2))
-    norm_T = torch.norm(target, p=2, dim=(1, 2))
-    loss_T = (diff_T / (norm_T + 1e-8)).mean()
+    diff_t = torch.norm(pred - target, p=2, dim=(1, 2))
+    norm_t = torch.norm(target, p=2, dim=(1, 2))
+    loss_t = (diff_t / (norm_t + 1e-8)).mean()
 
-    return loss_T
-
+    return loss_t
 
 
 # pylint: disable=too-many-arguments, too-many-positional-arguments
@@ -93,21 +89,21 @@ def visualize_sample(
     # Denormalize temperature values if statistics are provided
     if output_mean is not None and output_std is not None:
         # Convert to numpy if needed
-        if hasattr(output_mean, 'numpy'):
+        if hasattr(output_mean, "numpy"):
             mean_np = output_mean.cpu().numpy()
             std_np = output_std.cpu().numpy()
         else:
             mean_np = output_mean
             std_np = output_std
-        
+
         # Denormalize: T = T_normalized * std + mean
         t_vals = t_vals * std_np + mean_np
         p_vals = p_vals * std_np + mean_np
-        
+
         # Subtract reference temperature to show only temperature rise
-        T_ref = 293.15  # Reference temperature in Kelvin (20°C)
-        t_vals = t_vals - T_ref
-        p_vals = p_vals - T_ref
+        t_ref = 293.15  # Reference temperature in Kelvin (20°C)
+        t_vals = t_vals - t_ref
+        p_vals = p_vals - t_ref
 
     # 2. Geometric Denormalization
     c_01 = (c_valid + 1) / 2.0
@@ -120,10 +116,11 @@ def visualize_sample(
     # 4. Physical Field Extraction (output format: T only)
     t_gt = t_vals[:, 0]
     t_pred = p_vals[:, 0]
-    
+    t_range = t_vals[:, 0].max() - t_vals[:, 0].min()
+
     # Compute relative error in percentage
-    t_err_relative = np.abs((t_gt - t_pred) / (t_gt + 1e-8)) * 100.0
-    
+    t_err_relative = np.abs(t_gt - t_pred) / t_range * 100.0
+
     # Compute shared colorbar scales for temperature
     t_min = min(t_gt.min(), t_pred.min())
     t_max = max(t_gt.max(), t_pred.max())
@@ -145,19 +142,22 @@ def visualize_sample(
         triang, t_gt, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
     )
     axs[0, 0].set_ylabel("ΔT [K]", fontsize=14)
+    axs[0, 0].triplot(triang, color="gray", linewidth=0.1, alpha=0.5)
     fig.colorbar(im0, ax=axs[0, 0], fraction=0.046, pad=0.04)
 
     axs[0, 1].set_title("Predicted Temperature", fontsize=16, pad=10)
     im1 = axs[0, 1].tripcolor(
         triang, t_pred, shading="gouraud", cmap="inferno", vmin=t_min, vmax=t_max
     )
+    axs[0, 1].triplot(triang, color="gray", linewidth=0.1, alpha=0.5)
     fig.colorbar(im1, ax=axs[0, 1], fraction=0.046, pad=0.04)
 
     axs[0, 2].set_title("Relative Error (%)", fontsize=16, pad=10)
     im2 = axs[0, 2].tripcolor(
         triang, t_err_relative, shading="gouraud", cmap="hot", vmin=0, vmax=10
     )
-    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046, pad=0.04, label='Error %')
+    axs[0, 2].triplot(triang, color="gray", linewidth=0.1, alpha=0.5)
+    fig.colorbar(im2, ax=axs[0, 2], fraction=0.046, pad=0.04, label="Error %")
 
     # Input fields row
     axs[1, 0].set_title("Conductivity (Input)", fontsize=16, pad=10)
@@ -200,7 +200,7 @@ def visualize_sample(
     else:
         fname = f"{filename_prefix}.png"
 
-    plt.savefig(os.path.join(save_dir, fname), dpi=150)
+    plt.savefig(os.path.join(save_dir, fname), dpi=250)
     plt.close(fig)
 
 
@@ -269,7 +269,5 @@ def augment_batch(x_grid, y_mesh, coords):
 
         # Rotate coordinates
         coords = torch.matmul(coords, rot_matrix.T)
-        # No velocity vectors to rotate (vel_inlet is scalar, y_mesh is temperature only)
 
     return x_grid, y_mesh, coords
-
