@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_189\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 84343
+  -> Total DOFs: 82687
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,25 +10,35 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 11.5452s
-  Iter  1: err=6.51e-01(16.902s)
-  Iter  2: err=2.13e-01(17.219s)
-  Iter  3: err=1.03e-01(17.164s)
-  Iter  4: err=7.45e-02(17.317s)
-  Iter  5: err=6.08e-02(17.073s)
-  Iter  6: err=4.47e-02(16.949s)
-  Iter  7: err=2.74e-02(16.992s)
-  Iter  8: err=1.83e-02(17.193s)
-  Iter  9: err=1.29e-02(17.185s)
-  Iter 10: err=1.15e-02(17.161s)
-  Iter 11: err=9.55e-03(17.269s)
-  Iter 12: err=7.25e-03(16.871s)
-  Iter 13: err=5.44e-03(17.136s)
-  Iter 14: err=4.01e-03(17.053s)
-  Convergence reached.
+  Static Assembly: 20.8939s
+  Iter  1: err=2.66e+00(29.724s)
+  Iter  2: err=8.98e-01(30.085s)
+  Iter  3: err=6.10e-01(30.068s)
+  Iter  4: err=5.68e-01(29.457s)
+  Iter  5: err=3.36e-01(30.078s)
+  Iter  6: err=5.75e-01(30.110s)
+  Iter  7: err=6.00e-01(29.901s)
+  Iter  8: err=3.60e-01(29.322s)
+  Iter  9: err=2.87e-01(29.696s)
+  Iter 10: err=3.15e-01(30.240s)
+  Iter 11: err=1.91e-01(29.323s)
+  Iter 12: err=1.50e-01(29.210s)
+  Iter 13: err=1.90e-01(28.685s)
+  Iter 14: err=1.97e-01(28.323s)
+  Iter 15: err=2.54e-01(28.647s)
+  Iter 16: err=2.35e-01(28.621s)
+  Iter 17: err=6.22e-01(28.599s)
+  Iter 18: err=8.01e-01(27.795s)
+  Iter 19: err=4.34e-01(28.662s)
+  Iter 20: err=4.43e-01(28.351s)
+  Iter 21: err=1.89e-01(28.657s)
+  Iter 22: err=6.49e-02(29.595s)
+  Iter 23: err=4.49e-02(30.278s)
+  Iter 24: err=3.25e-02(30.121s)
+  Iter 25: err=4.01e-02(29.952s)
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [292.42, 386.63] K
+  -> Solved. Range: [290.48, 342.10] K
 Case 189 completed successfully.

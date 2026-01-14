@@ -10,18 +10,19 @@ import torch
 from loader import MeshToGridDataset
 from model import GeoFNO
 from torch import optim
+from torch.nn.functional import mse_loss
 from torch.utils.data import DataLoader, random_split
 from utils import (
     augment_batch,
     collate_fn,
-    compute_masked_loss,
-    visualize_sample, plot_history,
+    plot_history,
+    visualize_sample,
 )
 
-BATCH_SIZE = 16
-EPOCHS = 500
-LR = 1e-3
-PATIENCE = 20
+BATCH_SIZE = 8
+EPOCHS = 2000
+LR = 5e-2
+PATIENCE = 50
 NUM_EXAMPLES = 10
 
 
@@ -41,7 +42,8 @@ def train_and_evaluate():
         root_dir="./../data_generation/dataset",
         grid_size=(128, 128),
         input_keys=["conductivity", "power"],
-        output_keys=["temperature", "pressure", "vx", "vy"],
+        output_keys=["temperature"],  # Only temperature prediction
+        force_recompute=False,
     )
 
     train_size = int(0.8 * len(full_dataset))
@@ -55,6 +57,8 @@ def train_and_evaluate():
         collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -63,15 +67,12 @@ def train_and_evaluate():
         collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4,
     )
 
-    model = GeoFNO(
-        modes1=64,
-        modes2=64,
-        width=128,
-        dropout_rate=0.1
-    ).to(device)
-    
+    model = GeoFNO(modes1=8, modes2=8, width=64, dropout_rate=0.1).to(device)
+
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
@@ -90,19 +91,13 @@ def train_and_evaluate():
             x_grid = batch["x_grid"].to(device)
             y_mesh = batch["y_mesh"].to(device)
             coords = batch["query_coords"].to(device)
-            mask = batch["mask"].to(device)
 
             # Data Augmentation
             x_grid, y_mesh, coords = augment_batch(x_grid, y_mesh, coords)
 
-            # Input Noise
-            if model.training:
-                noise = torch.randn_like(x_grid[:, :2, ...]) * 0.001
-                x_grid[:, :2, ...] = x_grid[:, :2, ...] + noise
-
             optimizer.zero_grad()
             out = model(x_grid, coords)
-            loss = compute_masked_loss(out, y_mesh, mask)
+            loss = mse_loss(out, y_mesh, reduction="mean")
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -123,10 +118,9 @@ def train_and_evaluate():
                 x_grid = batch["x_grid"].to(device)
                 y_mesh = batch["y_mesh"].to(device)
                 coords = batch["query_coords"].to(device)
-                mask = batch["mask"].to(device)
 
                 out = model(x_grid, coords)
-                test_err += compute_masked_loss(out, y_mesh, mask).item()
+                test_err += mse_loss(out, y_mesh, reduction="mean").item()
 
         avg_test = test_err / len(test_loader)
         test_hist.append(avg_test)
@@ -157,51 +151,49 @@ def train_and_evaluate():
     # --- FINAL TEST SET VISUALIZATION ---
     print("\nStarting generation of Test Set visualizations...")
 
-    best_model_path = os.path.join(save_dir, "best_model.pth")
-    if os.path.exists(best_model_path):
-        model.load_state_dict(torch.load(best_model_path))
-        print("Loaded best model weights.")
-    else:
-        print("Warning: Best model not found. Using last epoch weights.")
+    os.path.join(save_dir, "best_model.pth")
 
     model.eval()
 
-    count = 0
     test_vis_dir = os.path.join(save_dir, "test_examples")
     os.makedirs(test_vis_dir, exist_ok=True)
     plot_history(train_hist, test_hist, save_dir)
     with torch.no_grad():
-        for _, batch in enumerate(test_loader):
-            if count >= NUM_EXAMPLES:
-                break
-
-            x_grid = batch["x_grid"].to(device)
-            y_mesh = batch["y_mesh"].to(device)
-            coords = batch["query_coords"].to(device)
-            mask = batch["mask"].to(device)
-
-            out = model(x_grid, coords)
-
-            batch_size_curr = x_grid.shape[0]
-            for i in range(batch_size_curr):
+        j = -1
+        for loader in [train_loader, test_loader]:
+            j += 1
+            count = 0
+            for _, batch in enumerate(loader):
                 if count >= NUM_EXAMPLES:
                     break
 
-                print(f"Saving test example {count+1}/{NUM_EXAMPLES}...")
-                visualize_sample(
-                    x_grid,
-                    coords,
-                    y_mesh,
-                    out,
-                    mask,
-                    epoch=None,
-                    save_dir=test_vis_dir,
-                    sample_idx=i,
-                    filename_prefix=f"test_sample_{count:03d}",
-                )
-                count += 1
+                x_grid = batch["x_grid"].to(device)
+                y_mesh = batch["y_mesh"].to(device)
+                coords = batch["query_coords"].to(device)
+                mask = batch["mask"].to(device)
 
-    print(f"Saved {count} test examples in {test_vis_dir}")
+                out = model(x_grid, coords)
+
+                batch_size_curr = x_grid.shape[0]
+                for i in range(batch_size_curr):
+                    if count >= NUM_EXAMPLES:
+                        break
+
+                    print(f"Saving test example {count+1}/{NUM_EXAMPLES}...")
+                    visualize_sample(
+                        x_grid,
+                        coords,
+                        y_mesh,
+                        out,
+                        mask,
+                        epoch=None,
+                        save_dir=test_vis_dir,
+                        sample_idx=i,
+                        filename_prefix=f"{["training", "test"][j]}_sample_{count:03d}",
+                        output_mean=full_dataset.output_mean,
+                        output_std=full_dataset.output_std,
+                    )
+                    count += 1
 
 
 if __name__ == "__main__":

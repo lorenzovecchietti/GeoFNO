@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_022\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 88537
+  -> Total DOFs: 81391
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,32 +10,35 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 13.3793s
-  Iter  1: err=6.06e-01(19.435s)
-  Iter  2: err=1.94e-01(19.274s)
-  Iter  3: err=9.35e-02(19.371s)
-  Iter  4: err=7.43e-02(18.760s)
-  Iter  5: err=6.92e-02(19.289s)
-  Iter  6: err=7.69e-02(19.444s)
-  Iter  7: err=8.22e-02(19.307s)
-  Iter  8: err=5.91e-02(19.017s)
-  Iter  9: err=3.97e-02(19.260s)
-  Iter 10: err=4.61e-02(19.101s)
-  Iter 11: err=5.27e-02(18.862s)
-  Iter 12: err=4.07e-02(19.088s)
-  Iter 13: err=2.42e-02(19.016s)
-  Iter 14: err=1.76e-02(19.082s)
-  Iter 15: err=1.67e-02(19.026s)
-  Iter 16: err=1.89e-02(19.080s)
-  Iter 17: err=1.49e-02(19.443s)
-  Iter 18: err=1.12e-02(19.436s)
-  Iter 19: err=8.92e-03(19.235s)
-  Iter 20: err=6.49e-03(19.084s)
-  Iter 21: err=4.79e-03(19.488s)
-  Convergence reached.
+  Static Assembly: 18.4204s
+  Iter  1: err=1.93e+00(28.719s)
+  Iter  2: err=6.16e-01(27.465s)
+  Iter  3: err=2.91e-01(28.269s)
+  Iter  4: err=2.10e-01(29.000s)
+  Iter  5: err=2.32e-01(29.165s)
+  Iter  6: err=2.36e-01(29.054s)
+  Iter  7: err=2.40e-01(28.397s)
+  Iter  8: err=1.67e-01(26.671s)
+  Iter  9: err=9.57e-02(27.830s)
+  Iter 10: err=7.90e-02(25.608s)
+  Iter 11: err=6.80e-02(26.710s)
+  Iter 12: err=5.97e-02(27.627s)
+  Iter 13: err=5.09e-02(27.663s)
+  Iter 14: err=4.07e-02(28.328s)
+  Iter 15: err=2.40e-02(28.600s)
+  Iter 16: err=2.34e-02(27.983s)
+  Iter 17: err=2.35e-02(27.768s)
+  Iter 18: err=1.75e-02(27.475s)
+  Iter 19: err=1.21e-02(27.612s)
+  Iter 20: err=9.51e-03(28.440s)
+  Iter 21: err=8.70e-03(28.412s)
+  Iter 22: err=7.79e-03(28.577s)
+  Iter 23: err=7.00e-03(28.365s)
+  Iter 24: err=6.74e-03(28.078s)
+  Iter 25: err=5.82e-03(27.368s)
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [291.06, 359.93] K
+  -> Solved. Range: [292.59, 355.69] K
 Case 22 completed successfully.

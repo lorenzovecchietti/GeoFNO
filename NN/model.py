@@ -102,6 +102,8 @@ class GeoFNO(nn.Module):
     Geometric Fourier Neural Operator (GeoFNO).
     Extends FNO by utilizing coordinate injection in the decoder to handle
     geometric queries and irregular mesh predictions.
+
+    Predicts only temperature field.
     """
 
     def __init__(self, modes1, modes2, width, dropout_rate):
@@ -110,21 +112,18 @@ class GeoFNO(nn.Module):
         self.modes2 = modes2
         self.width = width
 
-        # Encoder: Projects the multi-channel input (conductivity, power, coords, mask)
-        # to latent space
-        self.fc0 = nn.Conv2d(5, self.width, 1)
+        # Encoder: Projects the multi-channel input to latent space
+        # Input channels: conductivity, power, x, y, mask, vel_inlet (scalar)
+        self.fc0 = nn.Conv2d(6, self.width, 1)
 
         # Body: Sequential FNO layers
         self.fno_blocks = nn.ModuleList(
-            [FNOBlock(self.width, self.modes1, self.modes2) for _ in range(4)]
+            [FNOBlock(self.width, self.modes1, self.modes2) for _ in range(6)]
         )
 
-        # Decoder: Coordinate Injection MLP
-        # Input: Width (latent features) + 2 (physical X,Y coordinates)
-        self.fc1 = nn.Linear(self.width + 2, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, 4)  # Output: T, P, vx, vy
+        self.fc1 = nn.Linear(self.width + 2, self.width + 2)  # Temperature
         self.dropout = nn.Dropout(dropout_rate)
+        self.fc2 = nn.Linear(self.width + 2, 1)  # Temperature
 
     def forward(self, x_grid, query_coords):
         """
@@ -135,7 +134,7 @@ class GeoFNO(nn.Module):
             query_coords: Query coordinates on the mesh (B, N, 2)
 
         Returns:
-            Predicted values at query coordinates (B, N, 4)
+            Predicted temperature at query coordinates (B, N, 1)
         """
         # 1. Grid Encoding
         x = self.fc0(x_grid)
@@ -157,14 +156,11 @@ class GeoFNO(nn.Module):
         x_sampled = x_sampled.squeeze(2).permute(0, 2, 1)
 
         # 4. Coordinate Injection
-        # Concatenate latent features with exact physical coordinates
         x_cat = torch.cat([x_sampled, query_coords], dim=-1)
 
         # 5. Point-wise Decoding
-        x_out = F.gelu(self.fc1(x_cat))
-        x_out = self.dropout(x_out)
-        x_out = F.gelu(self.fc2(x_out))
-        x_out = self.dropout(x_out)
-        out = self.fc3(x_out)
 
-        return out
+        x = F.gelu(self.fc1(x_cat))  # (B, N, 1)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x

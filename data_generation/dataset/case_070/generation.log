@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_070\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 91111
+  -> Total DOFs: 95287
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,35 +10,30 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 14.3887s
-  Iter  1: err=5.38e-01(21.684s)
-  Iter  2: err=1.72e-01(20.171s)
-  Iter  3: err=5.84e-02(20.290s)
-  Iter  4: err=2.38e-02(20.312s)
-  Iter  5: err=1.32e-02(20.436s)
-  Iter  6: err=9.64e-03(20.082s)
-  Iter  7: err=7.80e-03(20.466s)
-  Iter  8: err=7.38e-03(20.041s)
-  Iter  9: err=7.00e-03(20.586s)
-  Iter 10: err=7.00e-03(20.382s)
-  Iter 11: err=6.91e-03(20.224s)
-  Iter 12: err=6.95e-03(20.433s)
-  Iter 13: err=6.92e-03(20.380s)
-  Iter 14: err=6.94e-03(20.244s)
-  Iter 15: err=6.92e-03(20.178s)
-  Iter 16: err=6.93e-03(20.392s)
-  Iter 17: err=6.93e-03(20.707s)
-  Iter 18: err=6.93e-03(20.470s)
-  Iter 19: err=6.93e-03(20.667s)
-  Iter 20: err=6.93e-03(20.129s)
-  Iter 21: err=6.93e-03(20.279s)
-  Iter 22: err=6.93e-03(20.791s)
-  Iter 23: err=6.93e-03(20.216s)
-  Iter 24: err=6.93e-03(19.833s)
-  Iter 25: err=6.93e-03(19.934s)
+  Static Assembly: 25.2152s
+  Iter  1: err=8.14e-01(35.404s)
+  Iter  2: err=2.77e-01(36.061s)
+  Iter  3: err=1.43e-01(34.512s)
+  Iter  4: err=9.94e-02(36.557s)
+  Iter  5: err=7.28e-02(41.589s)
+  Iter  6: err=5.18e-02(39.502s)
+  Iter  7: err=3.67e-02(39.171s)
+  Iter  8: err=3.08e-02(40.274s)
+  Iter  9: err=2.91e-02(37.593s)
+  Iter 10: err=2.32e-02(37.834s)
+  Iter 11: err=1.76e-02(37.386s)
+  Iter 12: err=1.42e-02(38.676s)
+  Iter 13: err=1.21e-02(38.253s)
+  Iter 14: err=1.07e-02(39.164s)
+  Iter 15: err=8.99e-03(39.285s)
+  Iter 16: err=7.38e-03(38.500s)
+  Iter 17: err=6.19e-03(37.947s)
+  Iter 18: err=5.27e-03(35.002s)
+  Iter 19: err=4.47e-03(35.985s)
+  Convergence reached.
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [292.22, 371.30] K
+  -> Solved. Range: [293.15, 374.58] K
 Case 70 completed successfully.

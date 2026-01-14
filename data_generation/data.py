@@ -57,15 +57,15 @@ TOL: Final[float] = 5e-3
 K: Final[int] = 1  # Polynomial degree
 
 DATASET_FOLDER = Path("dataset")
-N_SAMPLES = 200
-MAX_CPUS = 10
+N_SAMPLES = 500
+MAX_CPUS = 24
 
 # Parameter Ranges
 PARAM_RANGES = {
     "k_comps": (200.0, 500.0),
     "k_pcb": (0.01, 1.0),
     "vel_inlet": (0.001, 0.01),
-    "h_pcb": (0.01, 0.1),
+    "h_pcb": (0.05, 0.2),
     "w_pcb": (0.5, 0.85),
     "n_up": (0, 5),
     "w_comps": (0.1, 0.3),

@@ -1,0 +1,44 @@
+--- Starting Case 296 ---
+Generating mesh at dataset\case_296\mesh.msh...
+
+Initializing Finite Elements...
+  -> Total DOFs: 86179
+Setting up Boundary Conditions...
+Initializing with Stokes...
+  -> Stokes initialization successful.
+
+Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
+
+--- STEP 1/1: Nu = 1.00e-05 ---
+  Static Assembly: 23.6037s
+  Iter  1: err=8.79e-01(33.662s)
+  Iter  2: err=3.04e-01(33.596s)
+  Iter  3: err=1.56e-01(34.291s)
+  Iter  4: err=1.03e-01(34.250s)
+  Iter  5: err=7.30e-02(35.157s)
+  Iter  6: err=6.12e-02(34.709s)
+  Iter  7: err=5.59e-02(36.930s)
+  Iter  8: err=5.32e-02(37.479s)
+  Iter  9: err=5.48e-02(33.390s)
+  Iter 10: err=6.88e-02(33.845s)
+  Iter 11: err=1.22e-01(34.541s)
+  Iter 12: err=5.03e-01(36.323s)
+  Iter 13: err=3.86e-01(36.949s)
+  Iter 14: err=3.08e-01(36.300s)
+  Iter 15: err=2.17e-01(34.872s)
+  Iter 16: err=1.45e-01(35.654s)
+  Iter 17: err=1.22e-01(35.135s)
+  Iter 18: err=7.51e-02(37.028s)
+  Iter 19: err=4.19e-02(38.649s)
+  Iter 20: err=3.31e-02(37.851s)
+  Iter 21: err=6.63e-02(38.090s)
+  Iter 22: err=1.77e-01(36.260s)
+  Iter 23: err=7.86e-02(34.693s)
+  Iter 24: err=3.72e-02(34.290s)
+  Iter 25: err=2.61e-02(31.596s)
+Initializing Thermal Finite Elements (P1)...
+Mapping Velocity...
+Assembling Thermal System...
+Solving Thermal Linear System...
+  -> Solved. Range: [291.35, 348.84] K
+Case 296 completed successfully.

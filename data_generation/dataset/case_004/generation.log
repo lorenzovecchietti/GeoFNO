@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_004\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 79627
+  -> Total DOFs: 83227
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,26 +10,35 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 11.3394s
-  Iter  1: err=7.46e-01(18.681s)
-  Iter  2: err=2.27e-01(15.903s)
-  Iter  3: err=8.77e-02(16.385s)
-  Iter  4: err=5.17e-02(16.531s)
-  Iter  5: err=3.72e-02(16.490s)
-  Iter  6: err=2.88e-02(16.626s)
-  Iter  7: err=2.28e-02(16.995s)
-  Iter  8: err=1.77e-02(16.571s)
-  Iter  9: err=1.31e-02(16.048s)
-  Iter 10: err=9.85e-03(15.998s)
-  Iter 11: err=7.91e-03(16.167s)
-  Iter 12: err=6.74e-03(15.945s)
-  Iter 13: err=5.87e-03(16.219s)
-  Iter 14: err=5.10e-03(16.103s)
-  Iter 15: err=4.41e-03(16.073s)
-  Convergence reached.
+  Static Assembly: 17.1857s
+  Iter  1: err=2.81e+00(29.156s)
+  Iter  2: err=1.00e+00(28.209s)
+  Iter  3: err=1.03e+00(29.190s)
+  Iter  4: err=5.31e-01(29.807s)
+  Iter  5: err=4.54e-01(30.152s)
+  Iter  6: err=3.53e-01(30.705s)
+  Iter  7: err=3.14e-01(29.136s)
+  Iter  8: err=3.19e-01(27.787s)
+  Iter  9: err=2.39e-01(28.895s)
+  Iter 10: err=2.26e-01(26.071s)
+  Iter 11: err=2.24e-01(27.838s)
+  Iter 12: err=2.02e-01(28.454s)
+  Iter 13: err=4.04e-01(29.221s)
+  Iter 14: err=5.33e-01(28.516s)
+  Iter 15: err=4.40e-01(29.460s)
+  Iter 16: err=2.71e-01(29.274s)
+  Iter 17: err=2.83e-01(28.931s)
+  Iter 18: err=1.85e-01(27.898s)
+  Iter 19: err=1.72e-01(29.258s)
+  Iter 20: err=1.42e-01(28.863s)
+  Iter 21: err=2.06e-01(29.546s)
+  Iter 22: err=9.83e-01(28.710s)
+  Iter 23: err=6.55e+00(29.305s)
+  Iter 24: err=2.01e+00(28.952s)
+  Iter 25: err=7.69e-01(27.773s)
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [293.03, 379.42] K
+  -> Solved. Range: [291.24, 324.49] K
 Case 4 completed successfully.
