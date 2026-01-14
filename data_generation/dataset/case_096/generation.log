@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_096\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 86575
+  -> Total DOFs: 84991
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,25 +10,35 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 12.6033s
-  Iter  1: err=6.65e-01(18.560s)
-  Iter  2: err=2.33e-01(18.825s)
-  Iter  3: err=1.15e-01(18.645s)
-  Iter  4: err=7.70e-02(18.737s)
-  Iter  5: err=5.60e-02(19.248s)
-  Iter  6: err=4.06e-02(19.065s)
-  Iter  7: err=2.75e-02(18.160s)
-  Iter  8: err=1.98e-02(18.324s)
-  Iter  9: err=1.49e-02(19.200s)
-  Iter 10: err=1.18e-02(19.750s)
-  Iter 11: err=9.46e-03(19.310s)
-  Iter 12: err=7.40e-03(19.917s)
-  Iter 13: err=5.74e-03(19.486s)
-  Iter 14: err=4.36e-03(19.136s)
-  Convergence reached.
+  Static Assembly: 20.5406s
+  Iter  1: err=1.58e+00(29.269s)
+  Iter  2: err=5.68e-01(29.654s)
+  Iter  3: err=3.28e-01(29.593s)
+  Iter  4: err=2.86e-01(29.148s)
+  Iter  5: err=3.02e-01(29.410s)
+  Iter  6: err=8.16e-01(29.901s)
+  Iter  7: err=1.04e+00(30.297s)
+  Iter  8: err=6.41e-01(30.313s)
+  Iter  9: err=5.38e-01(28.242s)
+  Iter 10: err=3.67e-01(28.116s)
+  Iter 11: err=3.40e-01(31.187s)
+  Iter 12: err=2.97e-01(30.844s)
+  Iter 13: err=2.47e-01(31.012s)
+  Iter 14: err=1.85e-01(31.330s)
+  Iter 15: err=2.76e-01(32.015s)
+  Iter 16: err=1.50e-01(32.249s)
+  Iter 17: err=1.16e-01(29.731s)
+  Iter 18: err=9.96e-02(29.329s)
+  Iter 19: err=9.73e-02(31.839s)
+  Iter 20: err=6.87e-02(28.372s)
+  Iter 21: err=5.47e-02(27.309s)
+  Iter 22: err=4.68e-02(29.885s)
+  Iter 23: err=4.78e-02(29.742s)
+  Iter 24: err=3.53e-02(29.801s)
+  Iter 25: err=3.98e-02(30.255s)
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [292.65, 382.77] K
+  -> Solved. Range: [291.71, 328.35] K
 Case 96 completed successfully.

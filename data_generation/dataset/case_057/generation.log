@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_057\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 86323
+  -> Total DOFs: 85531
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,35 +10,27 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 13.4922s
-  Iter  1: err=5.68e-01(19.128s)
-  Iter  2: err=1.82e-01(18.864s)
-  Iter  3: err=6.07e-02(18.843s)
-  Iter  4: err=2.26e-02(18.861s)
-  Iter  5: err=1.16e-02(18.881s)
-  Iter  6: err=7.87e-03(18.707s)
-  Iter  7: err=6.34e-03(18.919s)
-  Iter  8: err=6.03e-03(18.984s)
-  Iter  9: err=5.63e-03(19.153s)
-  Iter 10: err=5.69e-03(19.187s)
-  Iter 11: err=5.55e-03(19.178s)
-  Iter 12: err=5.61e-03(19.208s)
-  Iter 13: err=5.56e-03(18.985s)
-  Iter 14: err=5.59e-03(19.416s)
-  Iter 15: err=5.57e-03(18.905s)
-  Iter 16: err=5.58e-03(19.417s)
-  Iter 17: err=5.57e-03(19.641s)
-  Iter 18: err=5.58e-03(18.996s)
-  Iter 19: err=5.57e-03(19.209s)
-  Iter 20: err=5.58e-03(19.261s)
-  Iter 21: err=5.57e-03(19.180s)
-  Iter 22: err=5.58e-03(19.463s)
-  Iter 23: err=5.57e-03(19.313s)
-  Iter 24: err=5.58e-03(19.459s)
-  Iter 25: err=5.57e-03(19.146s)
+  Static Assembly: 21.4059s
+  Iter  1: err=1.08e+00(32.060s)
+  Iter  2: err=3.55e-01(33.589s)
+  Iter  3: err=1.62e-01(33.005s)
+  Iter  4: err=1.01e-01(31.105s)
+  Iter  5: err=7.89e-02(30.459s)
+  Iter  6: err=6.82e-02(30.491s)
+  Iter  7: err=6.24e-02(30.729s)
+  Iter  8: err=7.12e-02(30.937s)
+  Iter  9: err=7.48e-02(31.484s)
+  Iter 10: err=5.71e-02(30.482s)
+  Iter 11: err=3.24e-02(31.623s)
+  Iter 12: err=1.84e-02(36.060s)
+  Iter 13: err=1.32e-02(34.900s)
+  Iter 14: err=8.74e-03(34.241s)
+  Iter 15: err=6.03e-03(34.677s)
+  Iter 16: err=3.41e-03(34.277s)
+  Convergence reached.
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [291.76, 355.43] K
+  -> Solved. Range: [293.06, 387.70] K
 Case 57 completed successfully.

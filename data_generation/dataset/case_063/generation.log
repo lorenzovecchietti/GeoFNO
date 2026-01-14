@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_063\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 85891
+  -> Total DOFs: 86539
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,35 +10,28 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 13.6797s
-  Iter  1: err=5.82e-01(18.979s)
-  Iter  2: err=1.82e-01(19.350s)
-  Iter  3: err=6.07e-02(19.143s)
-  Iter  4: err=2.46e-02(19.291s)
-  Iter  5: err=1.34e-02(19.231s)
-  Iter  6: err=9.90e-03(18.986s)
-  Iter  7: err=6.93e-03(19.474s)
-  Iter  8: err=6.84e-03(19.363s)
-  Iter  9: err=5.76e-03(19.103s)
-  Iter 10: err=6.01e-03(19.836s)
-  Iter 11: err=5.62e-03(19.203s)
-  Iter 12: err=5.78e-03(19.098s)
-  Iter 13: err=5.64e-03(19.284s)
-  Iter 14: err=5.72e-03(19.274s)
-  Iter 15: err=5.67e-03(20.637s)
-  Iter 16: err=5.70e-03(19.857s)
-  Iter 17: err=5.68e-03(20.754s)
-  Iter 18: err=5.69e-03(19.172s)
-  Iter 19: err=5.68e-03(19.362s)
-  Iter 20: err=5.69e-03(19.447s)
-  Iter 21: err=5.68e-03(20.596s)
-  Iter 22: err=5.69e-03(19.147s)
-  Iter 23: err=5.68e-03(19.363s)
-  Iter 24: err=5.69e-03(18.988s)
-  Iter 25: err=5.68e-03(20.213s)
+  Static Assembly: 23.4505s
+  Iter  1: err=7.82e-01(33.729s)
+  Iter  2: err=2.55e-01(33.347s)
+  Iter  3: err=1.19e-01(31.311s)
+  Iter  4: err=7.61e-02(30.593s)
+  Iter  5: err=5.30e-02(31.009s)
+  Iter  6: err=3.69e-02(31.121s)
+  Iter  7: err=2.49e-02(31.292s)
+  Iter  8: err=1.67e-02(31.722s)
+  Iter  9: err=1.22e-02(30.859s)
+  Iter 10: err=1.01e-02(32.647s)
+  Iter 11: err=9.16e-03(36.911s)
+  Iter 12: err=8.49e-03(35.173s)
+  Iter 13: err=7.77e-03(34.589s)
+  Iter 14: err=6.95e-03(35.786s)
+  Iter 15: err=6.11e-03(34.037s)
+  Iter 16: err=5.37e-03(34.426s)
+  Iter 17: err=4.77e-03(33.012s)
+  Convergence reached.
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [292.03, 343.44] K
+  -> Solved. Range: [293.15, 393.38] K
 Case 63 completed successfully.

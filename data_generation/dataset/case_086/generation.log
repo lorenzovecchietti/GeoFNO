@@ -2,7 +2,7 @@
 Generating mesh at dataset\case_086\mesh.msh...
 
 Initializing Finite Elements...
-  -> Total DOFs: 82651
+  -> Total DOFs: 84487
 Setting up Boundary Conditions...
 Initializing with Stokes...
   -> Stokes initialization successful.
@@ -10,29 +10,35 @@ Initializing with Stokes...
 Starting Solver Loop (Numba Accelerated). Target Nu=1.00e-05
 
 --- STEP 1/1: Nu = 1.00e-05 ---
-  Static Assembly: 12.1687s
-  Iter  1: err=7.41e-01(17.335s)
-  Iter  2: err=2.27e-01(17.388s)
-  Iter  3: err=9.62e-02(17.266s)
-  Iter  4: err=6.61e-02(17.105s)
-  Iter  5: err=5.21e-02(17.291s)
-  Iter  6: err=4.27e-02(17.058s)
-  Iter  7: err=3.63e-02(17.283s)
-  Iter  8: err=3.14e-02(17.589s)
-  Iter  9: err=2.74e-02(17.923s)
-  Iter 10: err=2.39e-02(17.212s)
-  Iter 11: err=1.97e-02(17.373s)
-  Iter 12: err=1.52e-02(18.433s)
-  Iter 13: err=1.21e-02(17.391s)
-  Iter 14: err=9.40e-03(17.420s)
-  Iter 15: err=7.23e-03(19.054s)
-  Iter 16: err=6.00e-03(17.927s)
-  Iter 17: err=5.33e-03(17.867s)
-  Iter 18: err=4.52e-03(17.512s)
-  Convergence reached.
+  Static Assembly: 22.8002s
+  Iter  1: err=1.80e+00(30.865s)
+  Iter  2: err=6.31e-01(30.512s)
+  Iter  3: err=4.41e-01(28.476s)
+  Iter  4: err=6.16e-01(28.157s)
+  Iter  5: err=6.70e-01(28.771s)
+  Iter  6: err=3.21e-01(28.119s)
+  Iter  7: err=2.78e-01(28.369s)
+  Iter  8: err=2.46e-01(28.186s)
+  Iter  9: err=1.91e-01(29.188s)
+  Iter 10: err=1.28e-01(28.921s)
+  Iter 11: err=1.05e-01(28.085s)
+  Iter 12: err=1.36e-01(28.558s)
+  Iter 13: err=1.46e-01(29.299s)
+  Iter 14: err=1.40e-01(29.330s)
+  Iter 15: err=1.24e-01(30.122s)
+  Iter 16: err=1.23e-01(28.173s)
+  Iter 17: err=1.89e-01(27.426s)
+  Iter 18: err=3.78e-01(29.156s)
+  Iter 19: err=4.44e-01(30.600s)
+  Iter 20: err=4.22e-01(30.303s)
+  Iter 21: err=2.37e-01(30.416s)
+  Iter 22: err=2.16e-01(31.744s)
+  Iter 23: err=1.81e-01(31.949s)
+  Iter 24: err=1.51e-01(30.358s)
+  Iter 25: err=1.47e-01(28.347s)
 Initializing Thermal Finite Elements (P1)...
 Mapping Velocity...
 Assembling Thermal System...
 Solving Thermal Linear System...
-  -> Solved. Range: [291.48, 350.01] K
+  -> Solved. Range: [291.67, 342.58] K
 Case 86 completed successfully.
