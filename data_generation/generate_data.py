@@ -23,7 +23,7 @@ from data import (
     N_SAMPLES,
     PARAM_RANGES,
 )
-from generate_mesh import CircuitBoard
+from mesh import CircuitBoard
 from scipy.spatial import cKDTree
 from scipy.stats import qmc
 from skfem import Basis, ElementQuad1, ElementQuad2, ElementVectorH1
