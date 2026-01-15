@@ -7,18 +7,15 @@
 2. [Data Generation: FEM Simulations](#data-generation-fem-simulations)
 3. [Neural Network: GeoFNO Architecture](#neural-network-geofno-architecture)
 4. [Practical Usage](#practical-usage)
-5. [References](#references)
 
 ---
 
 ## Project Overview
 
-This project combines **Finite Element Method (FEM)** simulations with **Deep Learning** to create a fast surrogate model for conjugate heat transfer problems. The workflow consists of two main components:
+The workflow consists of two main components:
 
 1. **Data Generation**: High-fidelity FEM simulations of laminar fluid flow and heat transfer over electronic components
 2. **Neural Network**: GeoFNO learns to predict temperature, pressure, and velocity fields from geometry and boundary conditions
-
-**Goal**: Replace expensive FEM simulations (minutes) with instant neural network predictions (milliseconds) while maintaining accuracy.
 
 ---
 
@@ -31,15 +28,6 @@ The data generation pipeline simulates **laminar, steady-state airflow** over a 
 - **Advection-diffusion equation** (heat transfer)
 
 Both are solved using the **Finite Element Method (FEM)** with the `scikit-fem` library.
-
-### Simulated Variables
-
-**Fluid Flow:**
-- **Velocity field** ($\mathbf{u}$): Vector field $[u_x, u_y]$ representing fluid speed and direction
-- **Pressure field** ($p$): Scalar field representing static pressure distribution
-
-**Heat Transfer:**
-- **Temperature field** ($T$): Scalar field representing temperature distribution in both fluid and solid regions
 
 ### Fixed Data & Parameters
 
@@ -74,105 +62,116 @@ The physical setup uses properties of **Air at 20°C** and standard PCB geometry
 ## 2. Mesh Generation
 
 The mesh is generated using the **GMSH** Python API. The generation process is handled in `data_generation/generate_mesh.py`.
-
-### Process:
-
-1. **Geometry Definition**: Rectangles are defined for the channel, the PCB, and the 5 electronic components
-2. **Fragmentation**: The `gmsh.model.occ.fragment` operation cuts the solid shapes out of the fluid domain. This ensures the mesh is **conformal**—nodes match perfectly at the fluid-solid interfaces
-3. **Physical Tagging**: Since IDs change after fragmentation, the script automatically identifies surfaces using their **Center of Mass** to assign physical tags (Fluid, PCB, Inlet, Outlet, etc.)
-4. **Discretization**: The domain is meshed with **Quadrilaterals** (via `RecombineAll=1`) to support high-quality tensor product elements
-
-**Why conformal meshes?**
-- Ensures continuity of temperature at fluid-solid interfaces
-- Enables accurate heat flux calculations
-- Simplifies coupling between fluid and thermal solvers
+**Strategy**: Conformal quadrilateral meshing. Solid components are fragmented from the fluid domain to ensure continuous nodes at interfaces.
 
 ---
 
 ## 3. Mathematical Formulation
 
-### 3.1 Fluid Flow Solver (`solve_fluid.py`)
+This project solves the coupled system of fluid dynamics and heat transfer using the **Finite Element Method (FEM)**. The solver is built on `scikit-fem` and utilizes custom Numba-accelerated kernels for the efficient assembly of stabilization terms.
 
-The solver uses **scikit-fem (skfem)** to discretize the weak form of the Navier-Stokes equations.
+### 3.1 Fluid Dynamics: Incompressible Navier-Stokes
 
-#### Finite Elements
+The fluid flow is governed by the steady-state incompressible Navier-Stokes equations. We solve for the velocity field $\mathbf{u} = (u_x, u_y)$ and the kinematic pressure field $p$:
 
-I used **Taylor-Hood (P2-P1)** elements, which satisfy the LBB (Ladyzhenskaya-Babuska-Brezzi) condition for stability:
-- **Velocity**: Quadratic (P2) Quadrilateral elements (`ElementVectorH1(ElementQuad2)`)
-- **Pressure**: Linear (P1) Quadrilateral elements (`ElementQuad1`)
+$$
+\begin{aligned}
+(\mathbf{u} \cdot \nabla) \mathbf{u} - \nu \Delta \mathbf{u} + \nabla p &= 0 \quad \text{in } \Omega_f \\
+\nabla \cdot \mathbf{u} &= 0 \quad \text{in } \Omega_f
+\end{aligned}
+$$
 
-**Why Taylor-Hood?**
-- Prevents spurious pressure oscillations
-- Satisfies inf-sup condition for mixed formulations
-- Standard choice for incompressible flow
+Where $\nu$ is the kinematic viscosity ($1.0 \times 10^{-5} \, m^2/s$).
+
+#### Discretization (Taylor-Hood Elements)
+To satisfy the **LBB (Ladyzhenskaya-Babuska-Brezzi)** inf-sup condition and ensure numerical stability, we employ **Taylor-Hood ($P_2-P_1$)** mixed elements:
+- **Velocity Space ($\mathbf{V}_h$):** Continuous piecewise Quadratic ($P_2$) elements (`ElementVectorH1(ElementQuad2)`).
+- **Pressure Space ($Q_h$):** Continuous piecewise Linear ($P_1$) elements (`ElementQuad1`).
 
 #### Linearization (Picard Iteration)
-
-The convective term $(\mathbf{u} \cdot \nabla)\mathbf{u}$ is non-linear. I linearize it using **Picard iterations** (Fixed Point iteration):
+The convective term $(\mathbf{u} \cdot \nabla)\mathbf{u}$ is non-linear. We resolve this using **Picard Iterations** (Fixed Point method). At each iteration $k$, the convective velocity is frozen from the previous step:
 
 $$
-(\mathbf{u}^{k+1} \cdot \nabla) \mathbf{u}^{k+1} \approx (\mathbf{u}^{k} \cdot \nabla) \mathbf{u}^{k+1}
+(\mathbf{u}^{k} \cdot \nabla) \mathbf{u}^{k+1} - \nu \Delta \mathbf{u}^{k+1} + \nabla p^{k+1} = 0
 $$
 
-Where $\mathbf{u}^k$ is the solution from the previous iteration.
+The loop continues until the relative error drops below the tolerance $\epsilon = 5 \times 10^{-3}$.
 
-### 3.2 Stabilization Techniques
+### 3.2 Stabilization Techniques (VMS)
 
-To handle the convection-dominated nature of the flow at lower viscosities (higher Reynolds numbers), standard Galerkin FEM becomes unstable (generating spurious oscillations). I employ a **Variational Multiscale (VMS)** approach with stabilization terms:
+Standard Galerkin FEM is inherently unstable for convection-dominated flows (high Reynolds numbers). We implement a **Variational Multiscale (VMS)** formulation with three specific stabilization terms added to the weak form.
 
 #### A. SUPG (Streamline-Upwind Petrov-Galerkin)
-
-Added to stabilize the convective term. It adds numerical diffusion **only in the direction of the flow streamlines**, preventing cross-wind diffusion.
+To prevent spurious node-to-node oscillations in the velocity field, we add diffusion strictly along the flow streamlines. The stabilization term is:
 
 $$
-\text{Term}_{\text{SUPG}} = \sum_{K} \tau_K (\mathbf{u}^k \cdot \nabla \mathbf{v}, \mathcal{R}(\mathbf{u}, p))_K
+S_{SUPG} = \sum_{K} \tau_K \left( (\mathbf{u}^k \cdot \nabla \mathbf{u}^{k+1} + \nabla p) \cdot (\mathbf{u}^k \cdot \nabla \mathbf{v}) \right)_K
 $$
 
-- **Purpose**: Prevents node-to-node oscillations in velocity
-- $\tau_K$: Stabilization parameter calculated based on local element size ($h$) and velocity magnitude
+The stabilization parameter $\tau_K$ is calculated dynamically per element based on the local element size $h$ and velocity magnitude $|\mathbf{u}|$:
+
+$$
+\tau_K = \frac{\delta_{supg}}{\sqrt{ \left(\frac{2 |\mathbf{u}|}{h}\right)^2 + \left(\frac{36 \nu}{h^2}\right)^2 }}
+$$
+
+Where $\delta_{supg} = 0.5$.
 
 #### B. Grad-Div Stabilization
-
-Adds a penalty on the divergence of the velocity test functions.
-
-$$
-\text{Term}_{\text{GradDiv}} = \gamma \| \mathbf{u} \| h (\nabla \cdot \mathbf{u}, \nabla \cdot \mathbf{v})
-$$
-
-- **Purpose**: Enforces mass conservation more strictly and improves the coupling between velocity and pressure solver blocks
-
-#### C. Penalty Method
-
-A small penalty term $\epsilon p q$ is subtracted from the continuity equation ($-\epsilon p q$).
-
-- **Purpose**: Regularizes the pressure matrix, ensuring solvability even if pressure boundary conditions are not strictly defined (removes the "hydrostatic pressure mode" singularity)
-
----
-
-### 3.3 Thermal Solver (`solve_thermal.py`)
-
-After solving the fluid flow, the velocity field is used to solve the **advection-diffusion equation** for temperature:
+This term penalizes the divergence of the velocity field to improve mass conservation and the coupling between velocity and pressure blocks.
 
 $$
-\rho c_p (\mathbf{u} \cdot \nabla T) - \nabla \cdot (k \nabla T) = Q
+S_{GradDiv} = \gamma |\mathbf{u}| h (\nabla \cdot \mathbf{u}) (\nabla \cdot \mathbf{v})
 $$
 
-Where:
-- $\mathbf{u}$: Velocity field from fluid solver (interpolated onto thermal mesh)
-- $k$: Thermal conductivity (different in fluid vs. solid regions)
-- $Q$: Volumetric heat source (non-zero only in electronic components)
-- $\rho c_p$: Heat capacity (assumed constant)
+Where $\gamma = 0.1$ is the scaling factor (`DELTA_GRADDIV`).
 
-**Coupling Strategy:**
-1. Solve fluid flow to get velocity field
-2. Interpolate velocity onto thermal mesh nodes
-3. Solve thermal problem with advection term
-4. One-way coupling (fluid affects temperature, but not vice versa)
+#### C. Pressure Penalty Regularization
+To ensure the solvability of the linear system and remove hydrostatic pressure modes, a small penalty term is subtracted from the continuity equation:
 
-**Why one-way coupling?**
-- Simplifies the problem (no need for iterative coupling)
-- Valid for small temperature differences (Boussinesq approximation not needed)
-- Faster computation
+$$
+S_{Penalty} = - \epsilon p q
+$$
+
+Where $\epsilon = 10^{-6}$ (`EPS_PENALTY`). This relaxes the incompressibility constraint slightly to $\nabla \cdot \mathbf{u} + \epsilon p = 0$.
+
+#### Final Stabilized Weak Form (Navier-Stokes)
+
+Find the solution $(\mathbf{u}^{k+1}, p^{k+1}) \in \mathbf{V}_h \times Q_h$ such that for all test functions $(\mathbf{v}, q) \in \mathbf{V}_h \times Q_h$, the following residual equation is satisfied:
+
+$$
+\begin{aligned}
+\mathcal{R}(\mathbf{u}^{k+1}, p^{k+1}; \mathbf{v}, q) &= \\
+&\quad \underbrace{ \int_\Omega \nu \nabla \mathbf{u}^{k+1} : \nabla \mathbf{v} \, d\Omega - \int_\Omega p^{k+1} (\nabla \cdot \mathbf{v}) \, d\Omega - \int_\Omega q (\nabla \cdot \mathbf{u}^{k+1}) \, d\Omega }_{\text{Standard Galerkin (Viscous + Pressure + Continuity)}} \\
+&\quad + \underbrace{ \int_\Omega [(\mathbf{u}^k \cdot \nabla) \mathbf{u}^{k+1}] \cdot \mathbf{v} \, d\Omega }_{\text{Convection (Picard Linearized)}} \\
+&\quad - \underbrace{ \int_\Omega \epsilon \, p^{k+1} q \, d\Omega }_{\text{Penalty Regularization}} \\
+&\quad + \underbrace{ \sum_{K \in \mathcal{T}_h} \int_K \tau_K \left( (\mathbf{u}^k \cdot \nabla) \mathbf{u}^{k+1} + \nabla p^{k+1} \right) \cdot \left( (\mathbf{u}^k \cdot \nabla) \mathbf{v} \right) \, d\Omega }_{\text{SUPG Stabilization}} \\
+&\quad + \underbrace{ \sum_{K \in \mathcal{T}_h} \int_K \gamma \|\mathbf{u}^k\| h_K (\nabla \cdot \mathbf{u}^{k+1}) (\nabla \cdot \mathbf{v}) \, d\Omega }_{\text{Grad-Div Stabilization}} = 0
+\end{aligned}
+$$
+
+
+**Where:**
+* $\mathbf{u}^k$: Velocity field from the previous iteration (Frozen).
+* $\nu$: Kinematic viscosity (`1e-5`).
+* $\epsilon$: Penalty parameter (`1e-6`).
+* $\tau_K$: SUPG stabilization parameter (dynamic per element).
+* $\gamma$: Grad-Div scaling factor (`0.1`).
+* $h_K$: Local element size.
+
+### 3.3 Conjugate Heat Transfer
+
+After obtaining the converged velocity field $\mathbf{u}$, we solve the linear Advection-Diffusion equation for temperature $T$ over the entire domain (Fluid + Solid):
+
+$$
+\rho c_p (\mathbf{u} \cdot \nabla T) - \nabla \cdot (k(\mathbf{x}) \nabla T) = Q(\mathbf{x})
+$$
+
+- **Coupling:** One-way coupling. The velocity $\mathbf{u}$ is interpolated from the fluid solution onto the thermal mesh.
+- **Conductivity ($k$):** Spatially varying field defined in `data.py`:
+  - Air: $k \approx 0.0263 \, W/m\cdot K$
+  - PCB: $k = 0.3 \, W/m\cdot K$
+  - Components: $k \in [200, 500] \, W/m\cdot K$
+- **Heat Source ($Q$):** Non-zero volumetric heat generation only within the electronic component subdomains ($10W$ to $30W$ per component).
 
 ---
 
