@@ -197,346 +197,50 @@ dataset/case_XXXX/
 
 # Neural Network: GeoFNO Architecture
 
-## Overview
-
-GeoFNO (Geometric Fourier Neural Operator) is a neural network architecture designed to learn mappings between function spaces for solving partial differential equations (PDEs) on irregular geometries. This implementation specifically targets conjugate heat transfer problems involving fluid flow and thermal transport in complex geometries with solid obstacles.
-
-## Problem Statement
-
-The network learns to predict:
-- **Temperature field** (T)
-
-Given:
-- **Thermal conductivity** distribution (k)
-- **Power/heat source** distribution (Q)
-- **Inlet velocity** (scalar value)
-- **Geometry** (solid/fluid regions)
-
-**Key Challenge**: FEM data lives on irregular meshes, but neural networks prefer regular grids. GeoFNO bridges this gap.
-
----
-
-## Architecture Design
-
-### 1. Encoder: Grid-Based Input Processing
-
-**Input Channels (6 total):**
-```
-[conductivity, power, grid_x, grid_y, solid_mask, vel_inlet]
-```
-
-- **conductivity**: Thermal conductivity field (varies between fluid and solid regions)
-- **power**: Heat generation field (non-zero in electronic components)
-- **grid_x, grid_y**: Spatial coordinates normalized to [-1, 1]
-- **solid_mask**: Binary mask distinguishing solid (1) from fluid (0) regions
-- **vel_inlet**: Scalar inlet velocity value broadcast across the entire grid
-
-**Why a regular grid?**
-- Fourier Neural Operators require structured data for efficient FFT operations
-- Grid representation enables spectral convolutions in frequency domain
-- Allows for translation-equivariant feature learning
-
-**Design Choice:**
-- `nn.Conv2d(6, width, 1)`: Projects multi-channel input to latent space
-- Uses 1×1 convolution for channel-wise feature extraction
-- Grid resolution: 128×128 (balances accuracy and computational cost)
-
-**Mesh-to-Grid Conversion:**
-- Irregular FEM mesh data is interpolated onto a regular 128×128 grid
-- Hybrid interpolation: linear (smooth) + nearest-neighbor (robust)
-- Preserves geometry information through explicit solid/fluid mask channel
-- Inlet velocity is added as a constant scalar channel to provide global boundary condition information
-
----
-
-### 2. Spectral Processing: FNO Blocks
-
-**Core Component: Spectral Convolution**
-
-The `SpectralConv2d` layer operates in Fourier space:
-
-```python
-x_ft = FFT(x)
-out_ft = ComplexMultiply(x_ft, learnable_weights)
-out = IFFT(out_ft)
-```
-
-**Why Fourier space?**
-- **Global receptive field**: Each point sees the entire domain instantly
-- **Multi-scale learning**: Different Fourier modes capture different scales
-- **Parameter efficiency**: Fewer parameters than equivalent spatial convolutions
-- **Physical intuition**: Many PDEs have natural frequency-domain representations
-
-**Fourier Modes Configuration:**
-- `modes1 = modes2 = 16`
-- Captures low to mid-frequency patterns
-- Higher modes = more detail, but risk overfitting
-- Chosen empirically to balance expressiveness and generalization
-
-**FNO Block Structure:**
-```
-FNOBlock = SpectralConv + Conv1x1 + InstanceNorm + GELU + Residual
-```
-
-**Why this combination?**
-- **Spectral path**: Learns global, frequency-based patterns
-- **Spatial path (Conv1x1)**: Learns local, pointwise transformations
-- **Residual connection**: Enables deep networks, stabilizes training
-- **Instance Normalization**: Normalizes per-sample, crucial for varying geometries
-- **GELU activation**: Smooth, non-linear, performs well in transformers/FNOs
-
-**Network Depth:**
-- 6 FNO blocks
-- Each block refines features at different abstraction levels
-- Increased depth for better capacity in temperature prediction
-
-**Latent Width:**
-- `width = 128` channels
-- Sufficient capacity for complex multi-physics interactions
-- Larger than typical FNO implementations due to coupled fluid-thermal problem
-
----
-
-### 3. Geometric Querying: Grid-to-Mesh Interpolation
-
-**Challenge:** 
-FNO operates on regular grids, but FEM solutions live on irregular meshes.
-
-**Solution:**
-```python
-x_sampled = F.grid_sample(x_latent, query_coords, mode='bilinear')
-```
-
-**Why grid_sample?**
-- Differentiable interpolation from grid to arbitrary points
-- Bilinear interpolation provides smooth gradients
-- Enables querying at exact mesh node locations
-- Handles irregular geometries without mesh-specific operations
-
-**Coordinate Normalization:**
-- Input coordinates normalized to [-1, 1] for `grid_sample`
-- Ensures consistent interpolation across different domain sizes
-
-**This is the key innovation**: The network learns on a regular grid but can predict at arbitrary mesh points!
-
----
-
-### 4. Decoder: Coordinate Injection MLP
-
-**Architecture:**
-```
-Input: [latent_features (128), physical_coords (2)] → 130 dimensions
-FC1: 130 → 130 (GELU + Dropout)
-FC2: 130 → 1 (Temperature output)
-```
-
-**Why Coordinate Injection?**
-- **Inductive bias**: Explicitly provides spatial information
-- **Geometry awareness**: Network knows exact query location
-- **Continuous representation**: Can query at any point, not just grid nodes
-- **Inspired by**: Neural implicit representations (NeRF, DeepSDF)
-
-**Why MLP instead of convolution?**
-- Operates on irregular mesh points (no spatial structure)
-- Pointwise prediction at each query location
-- Flexible output at arbitrary resolutions
-
-**Simplified Output:**
-- Single output channel for temperature prediction
-- Focused architecture eliminates multi-task interference
-- Better performance for the primary thermal prediction objective
-
-**Dropout (0.1):**
-- Regularization to prevent overfitting
-- Particularly important in decoder where overfitting is common
-
----
-
-## Training Strategy
-
-### Loss Function: Mean Squared Error (MSE)
-
-```python
-Loss = mse_loss(Prediction, Target, reduction="mean")
-```
-
-**Why MSE?**
-- **Standard regression loss**: Directly penalizes the difference between predicted and actual temperature values.
-- **Smooth gradients**: Provides stable gradients for backpropagation.
-- **Physical relevance**: Minimizing the squared difference is equivalent to finding the mean temperature distribution.
-
-**Relative Error Monitoring:**
-For evaluation, the model computes a **Relative Error (%)** defined as:
-$$
-\text{Error}_{\text{rel}} = \frac{|T_{\text{gt}} - T_{\text{pred}}|}{\max(T_{\text{gt}}) - \min(T_{\text{gt}})} \times 100
-$$
-This provides a more intuitive measure of accuracy independent of the absolute temperature scale.
-
----
-
-### Optimization
-
-**Optimizer: AdamW**
-- `lr = 5e-2`: A high learning rate is used to speed up initial convergence, compensated by the robust weight decay.
-- `weight_decay = 1e-4`: Regularization to prevent overfitting by penalizing large weights.
-- **Gradient Clipping**: `max_norm=1.0` is applied to prevent gradient explosion and stabilize training.
-
-**Scheduler: StepLR**
-- Reduces learning rate by 0.5 every 20 epochs.
-- Enables fine-tuning of weights in later training stages.
-
-**Early Stopping:**
-- `patience = 50`: Training stops if the test loss does not improve for 50 consecutive epochs.
-- Saves computational resources and prevents overfitting to the training set.
-
----
-
-### Data Augmentation
-
-**Geometric Augmentations:**
-
-1. **Random horizontal flip** (50% probability)
-   - Flips the grid and negates the horizontal coordinate.
-   - Preserves the thermal physics as the domain is symmetric.
-
-2. **Random rotation** (0°, 90°, 180°, 270°)
-   - Rotates the grid using `torch.rot90`.
-   - Applies a corresponding rotation matrix to the mesh coordinates.
-   - Significantly increases the effective dataset size and improves generalization to different component orientations.
-
-**Why augmentation?**
-- Exploits physical symmetries (rotation/reflection invariance).
-- Reduces the need for thousands of expensive FEM simulations.
-- Encourages the network to learn position-independent features.
-
----
-
-## Data Pipeline
-
-### Mesh-to-Grid Interpolation
-
-**Challenge:** FEM data is on irregular meshes, FNO needs regular grids.
-
-**Hybrid Interpolation Strategy:**
-1. **Linear interpolation** (primary method)
-   - Smooth, accurate within convex hull
-2. **Nearest-neighbor fallback** (for NaN regions)
-   - Fills extrapolation regions outside mesh
-   - Ensures no missing data
-
-**Solid/Fluid Mask Generation:**
-- Automatically detects fluid as most frequent conductivity value
-- Creates binary mask: 1 = solid, 0 = fluid
-- Uses nearest-neighbor interpolation to preserve sharp boundaries
-- Critical for geometry-aware learning
-
----
-
-### Normalization
-
-**Z-score normalization:**
-```
-x_norm = (x - mean) / std
-```
-
-**Why normalize?**
-- Different physical quantities have vastly different scales
-- Improves gradient flow and training stability
-- Computed globally across entire dataset for consistency
-
-**Cached Statistics:**
-- Mean and std saved to `stats.pt`
-- Ensures consistent normalization between train/test
-- Avoids recomputation on every run
-
----
-
-### Data Caching
-
-**Pre-loading Strategy:**
-- All data loaded into RAM at initialization
-- Grid interpolation cached to disk (`grid_hybrid_*.npy`)
-- Eliminates I/O bottleneck during training
-
-**Why cache?**
-- Mesh-to-grid interpolation is expensive
-- Training becomes I/O bound without caching
-- Enables fast iteration and experimentation
-
----
-
-## Key Design Decisions Summary
-
-| Component | Choice | Rationale |
-|-----------|--------|-----------|
-| **Input Channels** | 6 (k, Q, x, y, mask, vel_inlet) | Includes all relevant physics and boundary conditions |
-| **Grid Resolution** | 128×128 | Balance between detail and memory |
-| **Fourier Modes** | 16×16 | Captures relevant scales without overfitting |
-| **Latent Width** | 128 | Sufficient for thermal physics representation |
-| **FNO Depth** | 6 blocks | Deeper network for better feature abstraction |
-| **Normalization** | InstanceNorm | Handles varying geometries better than BatchNorm |
-| **Activation** | GELU | Smooth, performs well in transformer-like architectures |
-| **Decoder** | Coordinate Injection MLP | Enables continuous, geometry-aware predictions |
-| **Output** | Temperature only | Focused prediction eliminates multi-task interference |
-| **Loss** | Relative L2 (MSE) | Scale-invariant, standard for operator learning |
-| **Augmentation** | Flip + Rotation | Exploits physical symmetries, improves generalization |
-| **Interpolation** | Hybrid (Linear + Nearest) | Smooth inside mesh, robust outside |
-
----
-
-## Results
-
-### Training Performance
-
-The model was trained on 500 simulated cases with varying geometries, thermal conductivities, and heat sources. The training converged successfully with both training and test errors decreasing consistently.
-
-![Training History](NN/results/training_history.png)
-
-**Training Statistics:**
-- **Training Loss (MSE)**: Converged to ~0.03
-- **Test Error (Rel L2)**: Converged to ~0.025 (2.5% relative error)
-- **Epochs**: 180 epochs shown
-- **Convergence**: Smooth convergence without overfitting
-
-### Example Predictions
-
-Below are example predictions from the test set, showing the model's ability to accurately predict temperature fields for unseen geometries:
-
-#### Test Example
-![Test Prediction](NN/results/test_examples/test_sample_001.png)
-
-
-**Observations:**
-- Ground truth and predictions show excellent visual agreement
-- Relative error typically below 10% across the domain
-- Model correctly captures temperature gradients around heat sources
-- Solid-fluid interfaces are accurately resolved
-- Cool inlet air and heated components produce expected thermal patterns
-
----
-
-## Advantages Over Alternatives
-
-**vs. Standard CNNs:**
-- Global receptive field from first layer (Fourier transform)
-- More parameter-efficient for PDE learning
-- Better at capturing long-range dependencies
-
-**vs. Graph Neural Networks:**
-- No need for explicit graph construction
-- Faster training (structured grid operations)
-- Easier to implement and debug
-
-**vs. Standard FNO:**
-- Coordinate injection enables irregular mesh queries
-- Better geometry handling through explicit masking
-- More robust to varying domain shapes
-
-**vs. Traditional FEM:**
-- **Speed**: Milliseconds vs. minutes/hours
-- **Scalability**: Amortized cost over many queries
-- **Differentiability**: Can be integrated into optimization loops
-
+**Goal:** Solve conjugate heat transfer PDEs on irregular geometries by bridging finite element mesh (FEM) data with grid-based Neural Operators.
+
+## 1. Input Data & Processing
+The model inputs **6 physical channels** interpolated onto a regular **128×128 grid**:
+* **Channels:** `[conductivity, power, grid_x, grid_y, solid_mask, vel_inlet]`
+* **Mesh-to-Grid Strategy:**
+    * **Hybrid Interpolation:** Uses Linear interpolation for smoothness inside the mesh and Nearest-Neighbor to fill boundaries/NaNs.
+    * **Normalization:** Global Z-score standardization ($x_{norm} = \frac{x - \mu}{\sigma}$); stats cached for consistency.
+
+## 2. Encoder (Grid-Based)
+* **Layer:** `nn.Conv2d(6, 128, kernel_size=1)`
+* **Function:** Projects the multi-channel physical input into a 128-dimensional high-level feature space.
+
+## 3. Core Architecture: FNO Blocks
+A stack of **6 FNO Blocks** processes features in the frequency domain.
+
+**Block Structure:**
+1.  **Spectral Path:** FFT $\rightarrow$ Linear Transform (16 modes) $\rightarrow$ IFFT.
+    * *Captures global, low-frequency patterns.*
+2.  **Spatial Path:** Standard $1\times1$ Convolution.
+    * *Captures local, high-frequency details.*
+3.  **Normalization:** `InstanceNorm2d` (chosen over BatchNorm to handle varying geometry instances).
+4.  **Activation:** GELU.
+5.  **Residual Connection:** Adds input to output for stable deep training.
+
+## 4. Decoder: Geometric Querying (Key Innovation)
+Unlike standard FNOs that output grids, GeoFNO predicts values at exact, irregular mesh nodes.
+
+1.  **Grid-to-Mesh Interpolation:**
+    * Uses `F.grid_sample(latent_grid, query_coords, mode='bilinear')` to sample the 128 learned features at specific $(x, y)$ mesh locations.
+2.  **Coordinate Injection:**
+    * Explicitly concatenates physical coordinates to the sampled features:
+        `Input = [Latent Features (128) + Physical Coords (2)]` $\rightarrow$ 130 dims.
+3.  **MLP Head:**
+    * `Linear(130, 130)` $\rightarrow$ GELU $\rightarrow$ Dropout (0.1) $\rightarrow$ `Linear(130, 1)`
+    * Outputs the scalar **Temperature** field.
+
+## 5. Training Configuration
+* **Loss Function:** Mean Squared Error (MSE). Evaluated via Relative L2 Error.
+* **Optimizer:** AdamW (`lr=5e-2`, `weight_decay=1e-4`) with Gradient Clipping (`max_norm=1.0`).
+* **Scheduler:** StepLR (Decays $lr$ by 0.5 every 20 epochs).
+* **Augmentation:**
+    * **Random Flip:** Horizontal flipping (50%).
+    * **Random Rotation:** Discrete rotations ($0^\circ, 90^\circ, 180^\circ, 270^\circ$) to exploit physical symmetries and expand dataset size.
 
 ---
 
